@@ -1,0 +1,1630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" id="meta-theme-color" content="#0b1120" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>MoneyManager</title>
+  <style>
+    html,
+    body {
+      background-color: #0b1120;
+      color: #f1f5f9;
+    }
+    html[data-theme="light"],
+    html[data-theme="light"] body {
+      background-color: #f1f5f9;
+      color: #0f172a;
+    }
+  </style>
+  <script src="js/theme-init.js"></script>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg" />
+  <link rel="apple-touch-icon" href="icons/icon-192.svg" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="toast-container" aria-live="polite"></div>
+
+  <!-- AUTHENTICATION / FIRST-RUN SETUP VIEW -->
+  <main id="auth-view" class="auth-shell hidden">
+    <section class="auth-card">
+      <div class="auth-brand">
+        <img src="icons/icon-192.svg" alt="MoneyManager icon" class="auth-logo" />
+        <div>
+          <h1>MoneyManager</h1>
+          <p class="muted" data-i18n="authSubtitle">Multi-Account &amp; Pocket Finance Ledger</p>
+        </div>
+        <div class="lang-dropdown" data-lang-picker="auth-lang-select" style="margin-left:auto;">
+          <select id="auth-lang-select" class="sr-only-select" aria-label="Language">
+            <option value="en">EN - English</option>
+            <option value="hu">HU - Magyar</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- First-Run Account Setup -->
+      <form id="setup-form" class="auth-form hidden" action="api/auth/setup" method="POST">
+        <h2 data-i18n="setupTitle">Create Admin Account</h2>
+        <p class="muted small" data-i18n="setupDesc">
+          Set your username and strong password. Your browser or phone password manager will offer to save it securely.
+        </p>
+        <label class="field">
+          <span data-i18n="usernameLabel">Username</span>
+          <input id="setup-username" name="username" type="text" autocomplete="username" required minlength="2" data-i18n-placeholder="phUsername" placeholder="e.g. alex" />
+        </label>
+        <label class="field">
+          <span data-i18n="passwordLabel">Password</span>
+          <input id="setup-password" name="password" type="password" autocomplete="new-password" required minlength="6" data-i18n-placeholder="phPasswordMin" placeholder="Minimum 6 characters" />
+        </label>
+        <label class="field">
+          <span data-i18n="confirmPasswordLabel">Confirm Password</span>
+          <input id="setup-password-confirm" type="password" autocomplete="new-password" required minlength="6" data-i18n-placeholder="phPasswordRepeat" placeholder="Repeat password" />
+        </label>
+        <p id="setup-error" class="form-error hidden"></p>
+        <button type="submit" class="btn btn-primary btn-full" data-i18n="setupBtn">Create Account &amp; Open Dashboard</button>
+      </form>
+
+      <!-- Standard Sign-In (Password Manager Compatible) -->
+      <form id="login-form" class="auth-form hidden" action="api/auth/login" method="POST">
+        <h2 data-i18n="loginTitle">Welcome Back</h2>
+        <p class="muted small" data-i18n="loginDesc">Sign in to access your finances, pockets, and receipt scanner.</p>
+        <label class="field">
+          <span data-i18n="usernameLabel">Username</span>
+          <input id="login-username" name="username" type="text" autocomplete="username" required data-i18n-placeholder="usernameLabel" placeholder="Username" />
+        </label>
+        <label class="field">
+          <span data-i18n="passwordLabel">Password</span>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required data-i18n-placeholder="phPassword" placeholder="Password" />
+        </label>
+        <p id="login-error" class="form-error hidden"></p>
+        <button type="submit" class="btn btn-primary btn-full" data-i18n="loginBtn">Sign In</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- MAIN APP DASHBOARD -->
+  <div id="app-view" class="app-shell hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <img src="icons/icon-192.svg" alt="MoneyManager" class="brand-icon" />
+        <div>
+          <span class="brand-title">MoneyManager</span>
+          <span class="brand-sub" id="user-badge">Pi Self-Hosted</span>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <select id="month-filter" class="select-compact" aria-label="Filter month">
+          <option value="all" data-i18n="allTime">All Time</option>
+        </select>
+        <button id="btn-edit-dashboard" class="btn btn-secondary small" data-i18n="btnCustomize" data-i18n-title="titleCustomize" title="Customize and rearrange dashboard layout">📐 Customize</button>
+        <button id="btn-scan-receipt" class="btn btn-accent" data-i18n="btnScanReceipt">📷 Scan Receipt</button>
+        <button id="btn-add-tx" class="btn btn-primary" data-i18n="btnAddTx">+ Transaction</button>
+        <button id="btn-transfer" class="btn btn-secondary" data-i18n="btnTransfer">⇄ Transfer</button>
+        <div class="lang-dropdown" data-lang-picker="lang-select">
+          <select id="lang-select" class="sr-only-select" aria-label="Language">
+            <option value="en">EN - English</option>
+            <option value="hu">HU - Magyar</option>
+          </select>
+        </div>
+        <button id="btn-theme" class="btn btn-icon" data-i18n-title="titleToggleTheme" title="Toggle theme" aria-label="Toggle theme">🌓</button>
+        <button id="btn-settings" class="btn btn-secondary small" data-i18n="btnSettings" data-i18n-title="titleSettings" title="Settings" aria-label="Settings">⚙️ Settings</button>
+        <span id="session-timer-badge" class="session-timer-badge" role="button" tabindex="0" data-i18n-title="titleSessionTimer" title="Session auto-logout countdown (resets on interaction)">
+          ⏳ <span id="session-timer-text">10:00</span>
+        </span>
+        <button id="btn-logout" class="btn btn-ghost small" data-i18n="btnSignOut" data-i18n-title="btnSignOut" title="Sign out">Sign Out</button>
+      </div>
+    </header>
+
+    <main class="container" id="dashboard-container">
+      <!-- DASHBOARD EDIT / CUSTOMIZE BANNER -->
+      <section id="dashboard-edit-banner" class="edit-mode-banner hidden" aria-label="Dashboard Customization Controls">
+        <div class="edit-banner-top">
+          <div>
+            <strong data-i18n="editModeTitle">📐 Dashboard Edit Mode</strong>
+            <span class="muted small" data-i18n="editModeDesc">Drag sections, KPIs, banks, or graphs (or use ◀ ▶ buttons) to reorganize &amp; resize.</span>
+          </div>
+          <div class="edit-banner-actions">
+            <label class="toggle-row small">
+              <input type="checkbox" id="edit-hide-historical" />
+              <span data-i18n="editHideHistorical">Hide historical transactions</span>
+            </label>
+            <label class="toggle-row small" data-i18n-title="titleAutoSizeAll" title="Auto Size ON fills spaces evenly; turn OFF to resize any box freely">
+              <input type="checkbox" id="edit-auto-size-toggle" checked />
+              <span data-i18n="editAutoSizeMode">Auto Size (Fill Evenly)</span>
+            </label>
+            <button type="button" id="btn-reset-layout" class="btn btn-ghost small" data-i18n="btnResetDefault">🔄 Reset Default</button>
+            <button type="button" id="btn-done-layout" class="btn btn-primary small" data-i18n="btnDone">✅ Done</button>
+          </div>
+        </div>
+        <div id="edit-visibility-pills" class="edit-visibility-pills"></div>
+        <div id="edit-palette-bar" class="palette-bar"></div>
+      </section>
+
+      <div id="dashboard-sections">
+        <!-- KPI SUMMARY CARDS -->
+        <section id="section-kpis" class="section-block dash-section" data-section-id="kpis" data-section-title="Overview" aria-label="Financial Overview">
+          <div class="section-header">
+            <div>
+              <h2 data-i18n="kpisHeading">Overview</h2>
+              <p class="muted small" data-i18n="kpisDesc">Total net worth, period income, outgoing spending, and net cashflow summary.</p>
+            </div>
+            <div class="section-tools">
+              <button type="button" id="btn-choose-kpis" class="btn btn-secondary small" data-i18n="btnChooseKpis">🎛️ Choose Cards</button>
+            </div>
+          </div>
+          <div class="kpi-grid" id="kpi-grid">
+            <article class="kpi-card kpi-networth" data-widget-id="kpi-networth" data-widget-title="Total Net Worth">
+              <div class="kpi-label" data-i18n="kpiNetWorthLabel">Total Net Worth (All Banks &amp; Pockets)</div>
+              <div class="kpi-value" id="kpi-networth">0 Ft</div>
+              <div class="kpi-sub" id="kpi-currencies"></div>
+            </article>
+
+            <article class="kpi-card kpi-income" data-widget-id="kpi-income" data-widget-title="Income">
+              <div class="kpi-label" id="kpi-income-label" data-i18n="kpiIncomeLabel">Income</div>
+              <div class="kpi-value positive" id="kpi-income">+0 Ft</div>
+              <div class="kpi-sub" id="kpi-income-top"></div>
+            </article>
+
+            <article class="kpi-card kpi-expense" data-widget-id="kpi-expense" data-widget-title="Outgoing Spending">
+              <div class="kpi-label" id="kpi-expense-label" data-i18n="kpiExpenseLabel">Outgoing Spending</div>
+              <div class="kpi-value negative" id="kpi-expense">-0 Ft</div>
+              <div class="kpi-sub" id="kpi-expense-top"></div>
+            </article>
+
+            <article class="kpi-card kpi-cashflow" data-widget-id="kpi-cashflow" data-widget-title="Net Cashflow & Transfers">
+              <div class="kpi-label" data-i18n="kpiNetLabel">Net Cashflow &amp; Transfers</div>
+              <div class="kpi-value" id="kpi-net">0 Ft</div>
+              <div class="kpi-sub" id="kpi-savings-rate"></div>
+            </article>
+
+            <article class="kpi-card hidden" data-widget-id="kpi-savings-rate" data-widget-title="Savings Rate">
+              <div class="kpi-label" data-i18n="widgetTitleSavingsRate">Savings Rate</div>
+              <div class="kpi-value" id="kpi-savings-rate-val">0%</div>
+              <div class="kpi-sub" id="kpi-savings-rate-sub"></div>
+            </article>
+
+            <article class="kpi-card hidden" data-widget-id="kpi-daily-avg" data-widget-title="Daily Spending Avg">
+              <div class="kpi-label" data-i18n="widgetTitleDailyAvg">Daily Spending Avg</div>
+              <div class="kpi-value negative" id="kpi-daily-avg-val">0 Ft</div>
+              <div class="kpi-sub" id="kpi-daily-avg-sub"></div>
+            </article>
+
+            <article class="kpi-card hidden" data-widget-id="kpi-top-merchant" data-widget-title="Top Merchant">
+              <div class="kpi-label" data-i18n="widgetTitleTopMerchant">Top Merchant</div>
+              <div class="kpi-value" id="kpi-top-merchant-val">-</div>
+              <div class="kpi-sub" id="kpi-top-merchant-sub"></div>
+            </article>
+
+            <article class="kpi-card hidden" data-widget-id="kpi-biggest-expense" data-widget-title="Largest Purchase">
+              <div class="kpi-label" data-i18n="widgetTitleBiggestExpense">Largest Purchase</div>
+              <div class="kpi-value negative" id="kpi-biggest-expense-val">0 Ft</div>
+              <div class="kpi-sub" id="kpi-biggest-expense-sub"></div>
+            </article>
+
+            <article class="kpi-card hidden" data-widget-id="kpi-recurring" data-widget-title="Recurring & Subscriptions">
+              <div class="kpi-label" data-i18n="widgetTitleRecurringKpi">Recurring &amp; Subscriptions</div>
+              <div class="kpi-value" id="kpi-recurring-val">0 Ft</div>
+              <div class="kpi-sub" id="kpi-recurring-sub"></div>
+            </article>
+
+            <article class="kpi-card hidden" data-widget-id="kpi-tx-activity" data-widget-title="Activity & Receipts">
+              <div class="kpi-label" data-i18n="widgetTitleTxActivity">Activity &amp; Receipts</div>
+              <div class="kpi-value" id="kpi-tx-activity-val">0</div>
+              <div class="kpi-sub" id="kpi-tx-activity-sub"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- BANKS & POCKETS MATRIX -->
+        <section id="section-banks" class="section-block dash-section" data-section-id="banks" data-section-title="Banks & Pockets">
+          <div class="section-header">
+            <div>
+              <h2 data-i18n="banksHeading">Banks &amp; Pockets</h2>
+              <p class="muted small" data-i18n="banksDesc">Account and pocket balances update after every transaction. Click a pocket to filter or sync its live balance.</p>
+            </div>
+            <div class="section-tools">
+              <button id="btn-clear-scope" class="btn btn-ghost small hidden" data-i18n="btnClearScope">Clear Bank/Pocket Filter</button>
+              <button id="btn-toggle-archived" class="btn btn-ghost small hidden"></button>
+              <button id="btn-manage-accounts" class="btn btn-secondary small" data-i18n="btnManageAccounts">⚙️ Manage Accounts &amp; Pockets</button>
+              <button id="btn-add-bank" class="btn btn-secondary small" data-i18n="btnAddBank">+ Add Bank</button>
+            </div>
+          </div>
+          <div id="banks-grid" class="banks-grid"></div>
+        </section>
+
+        <!-- ANALYTICS GRAPHS -->
+        <section id="section-charts" class="section-block dash-section" data-section-id="charts" data-section-title="Spending & Income Analytics">
+          <div class="section-header">
+            <div>
+              <h2 data-i18n="analyticsHeading">Spending &amp; Income Analytics</h2>
+              <p class="muted small" data-i18n="analyticsDesc">Visual breakdown of monthly cashflow, spending categories, income streams, and top merchants.</p>
+            </div>
+            <div class="section-tools">
+              <button type="button" id="btn-charts-sync-ledger" class="btn btn-secondary small is-active" aria-pressed="true" data-i18n="btnChartsSyncLedger" data-i18n-title="titleChartsSyncLedger" title="Sync charts and KPIs with ledger filters and selected rows">🔗 Synced with Ledger</button>
+              <button type="button" id="btn-choose-charts" class="btn btn-secondary small" data-i18n="btnChooseCharts">🎛️ Choose Graphs</button>
+            </div>
+          </div>
+          <div id="charts-scope-bar" class="charts-scope-bar">
+            <div class="charts-scope-info">
+              <span id="charts-scope-badge" class="charts-scope-badge"></span>
+              <div id="charts-scope-pills" class="charts-scope-pills"></div>
+            </div>
+            <div id="charts-scope-actions" class="charts-scope-actions"></div>
+          </div>
+          <div class="charts-grid" id="charts-grid">
+            <article class="chart-card" data-widget-id="chart-monthly" data-widget-title="Monthly In, Out & Transfers">
+              <div class="chart-header">
+                <h3 data-i18n="chartMonthlyTitle">Monthly In, Out &amp; Transfers</h3>
+                <span class="muted small" data-i18n="chartMonthlySub">HUF equivalent</span>
+              </div>
+              <div id="chart-monthly" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card" data-widget-id="chart-donut" data-widget-title="Outgoing by Category">
+              <div class="chart-header">
+                <h3 data-i18n="chartDonutTitle">Outgoing by Category</h3>
+                <span class="muted small" id="donut-scope-label" data-i18n="chartDonutSub">Selected period</span>
+              </div>
+              <div id="chart-expense-donut" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card" data-widget-id="chart-income" data-widget-title="Income Sources & Transfers">
+              <div class="chart-header">
+                <h3 data-i18n="chartIncomeTitle">Income Sources &amp; Transfers</h3>
+                <span class="muted small" id="income-chart-sub" data-i18n="chartIncomeSub">In &amp; Transfer categories</span>
+              </div>
+              <div id="chart-income-sources" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card" data-widget-id="chart-balance" data-widget-title="Top Merchants & Recipients">
+              <div class="chart-header">
+                <h3 data-i18n="chartBalanceTitle">Top Merchants &amp; Recipients</h3>
+                <span class="muted small" id="merchants-chart-sub" data-i18n="chartBalanceSub">Highest spending places &amp; sources</span>
+              </div>
+              <div id="chart-balance-history" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card hidden" data-widget-id="chart-net-trend" data-widget-title="Monthly Net & Cumulative Savings">
+              <div class="chart-header">
+                <h3 data-i18n="chartNetTrendTitle">Monthly Net &amp; Cumulative Savings</h3>
+                <span class="muted small" data-i18n="chartNetTrendSub">Net cashflow vs running total</span>
+              </div>
+              <div id="chart-net-trend-body" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card hidden" data-widget-id="chart-daily-spend" data-widget-title="Daily Spending Pace">
+              <div class="chart-header">
+                <h3 data-i18n="chartDailySpendTitle">Daily Spending Pace</h3>
+                <span class="muted small" data-i18n="chartDailySpendSub">Recent active days vs daily average</span>
+              </div>
+              <div id="chart-daily-spend-body" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card hidden" data-widget-id="chart-weekday" data-widget-title="Spending by Day of Week">
+              <div class="chart-header">
+                <h3 data-i18n="chartWeekdayTitle">Spending by Day of Week</h3>
+                <span class="muted small" data-i18n="chartWeekdaySub">Monday to Sunday pattern</span>
+              </div>
+              <div id="chart-weekday-body" class="chart-body"></div>
+            </article>
+
+            <article class="chart-card hidden" data-widget-id="chart-bank-dist" data-widget-title="Wealth by Bank & Pocket">
+              <div class="chart-header">
+                <h3 data-i18n="chartWealthTitle">Wealth by Bank &amp; Pocket</h3>
+                <span class="muted small" data-i18n="chartWealthSub">Share of current net worth</span>
+              </div>
+              <div id="chart-bank-dist-body" class="chart-body"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- TRANSACTION LEDGER -->
+        <section class="section-block dash-section" id="ledger-section" data-section-id="ledger" data-section-title="Transaction Ledger">
+          <div class="section-header">
+            <div>
+              <h2 data-i18n="ledgerHeading">Transaction Ledger &amp; Balances After</h2>
+              <p class="muted small" data-i18n="ledgerDesc">Every entry records both the pocket balance and bank account total immediately after it.</p>
+            </div>
+            <div class="section-tools">
+              <button type="button" id="btn-auto-size-cols" class="btn btn-ghost small hidden" data-i18n="btnAutoSizeCols" data-i18n-title="titleAutoSizeCols" title="Set all ledger columns to auto size">⤢ Auto Size Columns</button>
+              <div class="ledger-count muted small" id="ledger-count">0 transactions</div>
+            </div>
+          </div>
+
+          <div id="pending-approvals-banner" class="pending-approvals-banner hidden">
+            <div class="pending-approvals-left">
+              <span>⏳</span>
+              <span id="pending-approvals-text">0 auto-logged transactions need approval.</span>
+            </div>
+            <div class="row-actions">
+              <button type="button" id="btn-filter-pending" class="btn btn-secondary small" data-i18n="btnFilterPending">Show Needs Approval</button>
+              <button type="button" id="btn-approve-all" class="btn btn-primary small" data-i18n="btnApproveAll">✓ Approve All</button>
+            </div>
+          </div>
+
+          <div class="ledger-controls-card">
+            <div class="filter-primary-row">
+              <input id="filter-search" type="search" data-i18n-placeholder="phSearchLedger" placeholder="Search merchant, note, category, items..." aria-label="Search transactions" />
+              <select id="filter-account" aria-label="Filter by bank"><option value="" data-i18n="allBanks">All Banks</option></select>
+              <select id="filter-pocket" aria-label="Filter by pocket"><option value="" data-i18n="allPockets">All Pockets</option></select>
+              <select id="filter-type" aria-label="Filter by type">
+                <option value="all" data-i18n="allTypes">All Types</option>
+                <option value="expense" data-i18n="typeExpense">Outgoing</option>
+                <option value="income" data-i18n="typeIncome">Income</option>
+                <option value="transfer" data-i18n="typeTransfer">Transfers</option>
+                <option value="adjustment" data-i18n="typeAdjustment">Balance Sync</option>
+              </select>
+              <select id="filter-category" aria-label="Filter by category"><option value="all" data-i18n="allCategories">All Categories</option></select>
+              <select id="filter-sort" aria-label="Order transactions">
+                <option value="date_desc" data-i18n="sortDateDesc">Sort: Newest First</option>
+                <option value="date_asc" data-i18n="sortDateAsc">Sort: Oldest First</option>
+                <option value="amount_desc" data-i18n="sortAmountDesc">Amount: High to Low</option>
+                <option value="amount_asc" data-i18n="sortAmountAsc">Amount: Low to High</option>
+                <option value="merchant_asc" data-i18n="sortMerchantAsc">Partner: A to Z</option>
+                <option value="merchant_desc" data-i18n="sortMerchantDesc">Partner: Z to A</option>
+                <option value="category_asc" data-i18n="sortCategoryAsc">Category: A to Z</option>
+                <option value="pocket_after_desc" data-i18n="sortPocketAfterDesc">Pocket Bal. After: High to Low</option>
+                <option value="pocket_after_asc" data-i18n="sortPocketAfterAsc">Pocket Bal. After: Low to High</option>
+              </select>
+            </div>
+            <div class="filter-secondary-row">
+              <div class="filter-scope-selects">
+                <select id="filter-approval" class="select-compact" aria-label="Filter by approval status">
+                  <option value="all" data-i18n="approvalFilterAll">All Approvals</option>
+                  <option value="needs_approval" data-i18n="approvalFilterPending">⏳ Needs Approval</option>
+                  <option value="approved" data-i18n="approvalFilterApproved">✅ Approved Only</option>
+                </select>
+                <select id="filter-visibility" class="select-compact" aria-label="Filter hidden vs visible">
+                  <option value="visible" data-i18n="visFilterVisible">Visible Entries</option>
+                  <option value="hidden" data-i18n="visFilterHidden">👁️ Hidden Only</option>
+                  <option value="all" data-i18n="visFilterAll">All (Include Hidden)</option>
+                </select>
+                <select id="filter-historical" class="select-compact" aria-label="Filter live vs historical">
+                  <option value="all" data-i18n="histAll">All Transactions (Live + Historical)</option>
+                  <option value="live" data-i18n="histLive">Live Only (Historical Hidden)</option>
+                  <option value="historical" data-i18n="histOnly">Historical Only</option>
+                </select>
+              </div>
+              <div class="filter-chips-group">
+                <button type="button" id="chip-filter-recurring" class="filter-chip" aria-pressed="false">
+                  <span data-i18n="chipRecurring">🔁 Recurring</span>
+                  <span class="chip-count hidden" id="chip-count-recurring">0</span>
+                </button>
+                <button type="button" id="chip-filter-excluded" class="filter-chip" aria-pressed="false">
+                  <span data-i18n="chipExcludedStats">📊 Stats Skipped</span>
+                  <span class="chip-count hidden" id="chip-count-excluded">0</span>
+                </button>
+                <button type="button" id="chip-filter-receipt" class="filter-chip" aria-pressed="false">
+                  <span data-i18n="chipHasReceipt">🧾 Has Receipt</span>
+                  <span class="chip-count hidden" id="chip-count-receipt">0</span>
+                </button>
+                <button type="button" id="chip-filter-notif" class="filter-chip" aria-pressed="false">
+                  <span data-i18n="chipFromNotif">📲 Notifications</span>
+                  <span class="chip-count hidden" id="chip-count-notif">0</span>
+                </button>
+              </div>
+              <button type="button" id="btn-reset-filters" class="btn btn-ghost small filter-reset-btn hidden" data-i18n="btnResetFilters">✕ Reset Filters</button>
+            </div>
+          </div>
+
+          <div id="ledger-bulk-bar" class="ledger-bulk-bar hidden">
+            <div class="ledger-bulk-left">
+              <strong id="ledger-bulk-count">0 selected</strong>
+              <span id="ledger-bulk-summary" class="ledger-bulk-summary muted small"></span>
+              <button type="button" id="btn-bulk-view-charts" class="btn btn-primary small" data-i18n="btnBulkViewCharts">📊 View in Charts</button>
+              <button type="button" id="btn-bulk-clear" class="btn btn-ghost small" data-i18n="btnBulkClear">Clear</button>
+            </div>
+            <div class="ledger-bulk-actions">
+              <button type="button" class="btn btn-secondary small" data-bulk-action="hide" data-i18n="btnBulkHide">👁️ Hide</button>
+              <button type="button" class="btn btn-ghost small" data-bulk-action="unhide" data-i18n="btnBulkUnhide">Unhide</button>
+              <button type="button" class="btn btn-secondary small" data-bulk-action="exclude_analytics" data-i18n="btnBulkSkipStats">📊 Skip Stats</button>
+              <button type="button" class="btn btn-ghost small" data-bulk-action="include_analytics" data-i18n="btnBulkIncludeStats">Include Stats</button>
+              <button type="button" class="btn btn-secondary small" data-bulk-action="approve" data-i18n="btnBulkApprove">✓ Approve</button>
+              <div class="bulk-inline-group">
+                <select id="bulk-property-action" class="select-compact small" aria-label="More property actions">
+                  <option value="" data-i18n="bulkPropPlaceholder">More properties...</option>
+                  <option value="needs_approval" data-i18n="optBulkNeedsApproval">⏳ Mark Needs Approval</option>
+                  <option value="mark_recurring" data-i18n="optBulkMarkRecurring">🔁 Mark Recurring</option>
+                  <option value="unmark_recurring" data-i18n="optBulkUnmarkRecurring">Remove Recurring</option>
+                  <option value="mark_live" data-i18n="optBulkMarkLive">Mark Live</option>
+                  <option value="mark_historical" data-i18n="optBulkMarkHistorical">Mark Historical</option>
+                </select>
+                <button type="button" id="btn-bulk-apply-prop" class="btn btn-secondary small" data-i18n="btnBulkApply">Apply</button>
+              </div>
+              <div class="bulk-inline-group">
+                <select id="bulk-category-select" class="select-compact small" aria-label="Change category in bulk"></select>
+                <button type="button" id="btn-bulk-apply-cat" class="btn btn-secondary small" data-i18n="btnBulkSetCategory">Set Category</button>
+              </div>
+              <button type="button" class="btn btn-danger small" data-bulk-action="delete" data-i18n="btnBulkDelete">🗑️ Delete</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="ledger-table" id="ledger-table">
+              <thead>
+                <tr>
+                  <th class="col-select" data-col-key="select"><input type="checkbox" id="ledger-select-all" aria-label="Select all" /></th>
+                  <th class="th-sortable" data-col-key="date" data-sort-asc="date_asc" data-sort-desc="date_desc" data-sort-default="date_desc"><span class="th-sort-label"><span data-i18n="thDateType">Date &amp; Type</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="date" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="th-sortable" data-col-key="flow" data-sort-asc="account_asc" data-sort-desc="account_desc" data-sort-default="account_asc"><span class="th-sort-label"><span data-i18n="thFlow">Origin → Destination</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="flow" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="th-sortable" data-col-key="category" data-sort-asc="category_asc" data-sort-desc="category_desc" data-sort-default="category_asc"><span class="th-sort-label"><span data-i18n="thCategory">Category</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="category" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th data-col-key="note"><span data-i18n="thNote">Note</span><span class="col-resizer" data-col-resizer="note" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="num th-sortable" data-col-key="amount" data-sort-asc="amount_asc" data-sort-desc="amount_desc" data-sort-default="amount_desc"><span class="th-sort-label"><span data-i18n="thAmount">Amount</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="amount" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="num th-sortable" data-col-key="pocketBefore" data-sort-asc="pocket_before_asc" data-sort-desc="pocket_before_desc" data-sort-default="pocket_before_desc"><span class="th-sort-label"><span data-i18n="thPocketBalBefore">Pocket Bal. Before</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="pocketBefore" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="num th-sortable" data-col-key="pocketAfter" data-sort-asc="pocket_after_asc" data-sort-desc="pocket_after_desc" data-sort-default="pocket_after_desc"><span class="th-sort-label"><span data-i18n="thPocketBalAfter">Pocket Bal. After</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="pocketAfter" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="num th-sortable" data-col-key="bankBefore" data-sort-asc="bank_before_asc" data-sort-desc="bank_before_desc" data-sort-default="bank_before_desc"><span class="th-sort-label"><span data-i18n="thBankBalBefore">Bank Bal. Before</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="bankBefore" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="num th-sortable" data-col-key="bankAfter" data-sort-asc="bank_after_asc" data-sort-desc="bank_after_desc" data-sort-default="bank_after_desc"><span class="th-sort-label"><span data-i18n="thBankBalAfter">Bank Bal. After</span><span class="sort-ind"></span></span><span class="col-resizer" data-col-resizer="bankAfter" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                  <th class="actions-col" data-col-key="actions"><span data-i18n="thActions">Actions</span><span class="col-resizer" data-col-resizer="actions" data-i18n-title="titleColResize" title="Drag to resize column, double-click to auto-fit"></span></th>
+                </tr>
+              </thead>
+              <tbody id="ledger-tbody"></tbody>
+            </table>
+            <div id="ledger-empty" class="empty-state hidden">
+              <p data-i18n="ledgerEmpty1">No transactions match the current filters yet.</p>
+              <p class="muted small" data-i18n="ledgerEmpty2">Scan a receipt, add a transaction, or import your spreadsheet to get started.</p>
+            </div>
+          </div>
+
+          <div id="ledger-pagination-bar" class="ledger-pagination-bar">
+            <div class="pagination-summary muted small" id="ledger-page-summary">Showing 0 of 0</div>
+            <div class="pagination-controls" id="ledger-page-buttons"></div>
+            <div class="page-size-controls">
+              <label for="ledger-page-size-select" class="muted small" data-i18n="rowsPerPageLabel">Rows / page:</label>
+              <select id="ledger-page-size-select" class="select-compact small" aria-label="Rows per page">
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="250">250</option>
+                <option value="custom" data-i18n="rowsPerPageCustomOpt">Custom...</option>
+              </select>
+              <input id="ledger-page-size-custom" type="number" min="1" max="500" step="1" class="page-size-custom-input hidden" data-i18n-title="titleCustomRows" title="Custom visible rows per page (1-500)" aria-label="Custom visible rows per page" />
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- MOBILE BOTTOM BAR -->
+    <nav class="mobile-nav" aria-label="Quick navigation">
+      <button id="mnav-scan" class="mnav-btn mnav-primary" data-i18n="mnavScan">📷 Scan</button>
+      <button id="mnav-add" class="mnav-btn" data-i18n="mnavAdd">+ Add</button>
+      <button id="mnav-transfer" class="mnav-btn" data-i18n="mnavTransfer">⇄ Move</button>
+      <button id="mnav-settings" class="mnav-btn" data-i18n="mnavSettings">⚙️ Settings</button>
+    </nav>
+  </div>
+
+  <!-- MODAL: ADD / EDIT TRANSACTION -->
+  <dialog id="tx-modal" class="modal">
+    <form id="tx-form" class="modal-card modal-medium" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 id="tx-modal-title" data-i18n="txModalAdd">Add Transaction</h3>
+          <p class="modal-subtitle muted small" data-i18n="txModalSub">Choose where the money comes from, where it goes, and the amount.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="tx-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="tx-id" />
+        <div class="type-tabs" role="tablist">
+          <button type="button" class="type-tab active" data-tx-type="expense" data-i18n="txTabExpense">💸 Outgoing (Out)</button>
+          <button type="button" class="type-tab" data-tx-type="income" data-i18n="txTabIncome">💰 Income (In)</button>
+          <button type="button" class="type-tab" data-tx-type="transfer" data-i18n="txTabTransfer">⇄ Transfer</button>
+        </div>
+        <input type="hidden" id="tx-type" value="expense" />
+
+        <div class="flow-grid">
+          <!-- ORIGIN -->
+          <div class="flow-box">
+            <div class="flow-box-header">
+              <strong data-i18n="originHeader">1. Origin (From)</strong>
+            </div>
+            <div class="mode-switch" role="group" aria-label="Origin type">
+              <button type="button" class="mode-pill active" id="orig-mode-pocket" data-i18n="modeMyPocket">My Account / Pocket</button>
+              <button type="button" class="mode-pill" id="orig-mode-external" data-i18n="modeExternalIn">Person / Source (In)</button>
+            </div>
+            <div id="orig-pocket-box">
+              <label class="field">
+                <span data-i18n="originBank">Origin Bank</span>
+                <select id="tx-orig-account"></select>
+              </label>
+              <label class="field">
+                <span data-i18n="originPocket">Origin Pocket</span>
+                <select id="tx-orig-pocket"></select>
+              </label>
+            </div>
+            <div id="orig-external-box" class="hidden">
+              <label class="field combobox-field">
+                <span data-i18n="incomeSourcePerson">Income Source / Person</span>
+                <div class="combobox-wrap">
+                  <input id="tx-orig-external-input" type="text" autocomplete="off" data-i18n-placeholder="phOriginExternal" placeholder="Type to filter or add new source..." />
+                  <div id="tx-orig-external-list" class="combobox-list hidden"></div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <button type="button" id="tx-flow-swap-btn" class="flow-arrow" data-i18n-title="titleSwapFlow" title="Swap Origin and Destination" aria-label="Swap Origin and Destination"><span class="flow-arrow-glyph" aria-hidden="true">→</span></button>
+
+          <!-- DESTINATION -->
+          <div class="flow-box">
+            <div class="flow-box-header">
+              <strong data-i18n="destHeader">2. Destination (To)</strong>
+            </div>
+            <div class="mode-switch" role="group" aria-label="Destination type">
+              <button type="button" class="mode-pill active" id="dest-mode-external" data-i18n="modeExternalOut">Merchant / Place (Out)</button>
+              <button type="button" class="mode-pill" id="dest-mode-pocket" data-i18n="modeMyPocket">My Account / Pocket</button>
+            </div>
+            <div id="dest-external-box">
+              <label class="field combobox-field">
+                <span data-i18n="merchantRecipient">Merchant / Recipient</span>
+                <div class="combobox-wrap">
+                  <input id="tx-dest-external-input" type="text" autocomplete="off" data-i18n-placeholder="phDestExternal" placeholder="Type to filter or add new (e.g. Supermarket, Fuel Station, Store)..." />
+                  <div id="tx-dest-external-list" class="combobox-list hidden"></div>
+                </div>
+              </label>
+            </div>
+            <div id="dest-pocket-box" class="hidden">
+              <label class="field">
+                <span data-i18n="destBank">Destination Bank</span>
+                <select id="tx-dest-account"></select>
+              </label>
+              <label class="field">
+                <span data-i18n="destPocket">Destination Pocket</span>
+                <select id="tx-dest-pocket"></select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-section-card">
+          <div class="flow-box-header">
+            <strong data-i18n="txDetailsHeader">3. Transaction Details</strong>
+          </div>
+          <div class="form-grid-2">
+            <label class="field">
+              <span data-i18n="dateTimeLabel">Date &amp; Time</span>
+              <input id="tx-date" type="datetime-local" required />
+            </label>
+            <label class="field">
+              <span data-i18n="amountLabel">Amount</span>
+              <div class="input-with-addon">
+                <input id="tx-amount" type="number" step="0.01" min="0.01" required placeholder="0" />
+                <select id="tx-currency" aria-label="Currency">
+                  <option value="HUF">HUF</option>
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
+                </select>
+              </div>
+            </label>
+          </div>
+
+          <div class="form-grid-2">
+            <label class="field" id="tx-category-wrap">
+              <span data-i18n="categoryLabel">Category</span>
+              <select id="tx-category"></select>
+            </label>
+            <label class="field hidden" id="tx-dest-amount-wrap">
+              <span data-i18n="receivedAmountLabel">Received Amount (optional cross-FX)</span>
+              <input id="tx-dest-amount" type="number" step="0.01" min="0.01" data-i18n-placeholder="phAutoConverted" placeholder="Auto-converted" />
+            </label>
+          </div>
+
+          <label class="field" style="margin-bottom:0;">
+            <span data-i18n-html="noteAutoHintHtml">Note <em class="muted">(leave blank to auto-generate for general categories like Shopping)</em></span>
+            <textarea id="tx-note" rows="2" data-i18n-placeholder="phTxNote" placeholder="Write a manual note, or leave empty for smart auto-generated note..."></textarea>
+          </label>
+          <div class="tx-flags-grid" style="margin-top:10px;">
+            <label class="toggle-row small">
+              <input type="checkbox" id="tx-exclude-analytics" />
+              <span data-i18n="excludeFromAnalyticsLabel">Exclude from analytics (KPIs &amp; charts)</span>
+            </label>
+            <label class="toggle-row small">
+              <input type="checkbox" id="tx-recurring" />
+              <span data-i18n="propRecurringLabel">🔁 Recurring / Subscription</span>
+            </label>
+            <label class="toggle-row small">
+              <input type="checkbox" id="tx-historical" />
+              <span data-i18n="propHistoricalLabel">🏛️ Historical transaction (exclude from live balance)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <button type="button" id="tx-attach-receipt-btn" class="btn btn-secondary small hidden" data-i18n="btnAttachReceipt">📷 Attach / Scan Receipt</button>
+          <button type="button" id="tx-duplicate-btn" class="btn btn-secondary small hidden" data-i18n="btnDuplicateTx">📋 Duplicate</button>
+        </div>
+        <button type="button" class="btn btn-ghost" data-close="tx-modal" data-i18n="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="tx-save-btn" data-i18n="saveTx">Save Transaction</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL: RECEIPT SCANNER -->
+  <dialog id="receipt-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="receiptModalTitle">📷 Receipt &amp; Bank Screenshot Scanner</h3>
+          <p class="modal-subtitle muted small" data-i18n="receiptModalSub">Upload a receipt photo or banking app screenshot to extract store, items, amount, bank, and note automatically.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="receipt-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="receipt-attach-banner" class="status-banner hidden"></div>
+        <div class="receipt-controls">
+          <label class="field">
+            <span data-i18n="targetBankPocket">Target Bank &amp; Pocket</span>
+            <select id="receipt-pocket"></select>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="receipt-autolog" />
+            <span data-i18n-html="instantAutoLogHtml"><strong>Instant Auto-Log</strong> (skip review and immediately log into pocket)</span>
+          </label>
+          <label class="toggle-row hidden" id="receipt-skip-scan-row">
+            <input type="checkbox" id="receipt-skip-scan" />
+            <span data-i18n-html="skipScanAttachHtml"><strong>Skip AI scan</strong> (just attach image without changing fields or note)</span>
+          </label>
+        </div>
+
+        <div id="receipt-quota-bar" class="vision-quota-card"></div>
+
+        <label class="dropzone" id="receipt-dropzone" for="receipt-file-input">
+          <input id="receipt-file-input" type="file" accept="image/*" capture="environment" class="sr-only" />
+          <div class="dropzone-content">
+            <div class="dropzone-icon">🧾 📱</div>
+            <div><strong data-i18n="tapTakePhoto">Tap to upload a receipt or banking screenshot</strong> <span data-i18n="orDropImage">or drop an image here</span></div>
+            <div class="muted small" data-i18n="geminiVisionSub">Gemini Vision reads paper receipts and mobile banking app screenshots</div>
+          </div>
+        </label>
+
+        <div id="receipt-progress-box" class="receipt-progress-box hidden" aria-live="polite">
+          <div class="receipt-progress-header">
+            <div class="receipt-progress-title-row">
+              <span class="receipt-spinner" id="receipt-spinner" aria-hidden="true"></span>
+              <strong id="receipt-stage-title" data-i18n="processingReceiptTitle">Processing receipt...</strong>
+            </div>
+            <span id="receipt-elapsed" class="receipt-elapsed-badge">0.0s</span>
+          </div>
+          <div class="receipt-progress-track">
+            <div id="receipt-progress-fill" class="receipt-progress-fill" style="width:0%"></div>
+          </div>
+          <ul class="receipt-steps-list">
+            <li id="receipt-step-read" class="receipt-step-item">
+              <span class="receipt-step-dot" aria-hidden="true"></span>
+              <span class="receipt-step-label" data-i18n="stepReadLabel">1. Reading image file</span>
+              <span class="receipt-step-meta" id="receipt-step-read-meta"></span>
+            </li>
+            <li id="receipt-step-compress" class="receipt-step-item">
+              <span class="receipt-step-dot" aria-hidden="true"></span>
+              <span class="receipt-step-label" data-i18n="stepCompressLabel">2. Optimizing &amp; compressing image</span>
+              <span class="receipt-step-meta" id="receipt-step-compress-meta"></span>
+            </li>
+            <li id="receipt-step-upload" class="receipt-step-item">
+              <span class="receipt-step-dot" aria-hidden="true"></span>
+              <span class="receipt-step-label" data-i18n="stepUploadLabel">3. Uploading &amp; scanning with Gemini Vision</span>
+              <span class="receipt-step-meta" id="receipt-step-upload-meta"></span>
+            </li>
+            <li id="receipt-step-extract" class="receipt-step-item">
+              <span class="receipt-step-dot" aria-hidden="true"></span>
+              <span class="receipt-step-label" data-i18n="stepExtractLabel">4. Extracting items &amp; updating pocket</span>
+              <span class="receipt-step-meta" id="receipt-step-extract-meta"></span>
+            </li>
+          </ul>
+        </div>
+
+        <div id="receipt-status" class="status-banner hidden"></div>
+
+        <div id="receipt-preview-panel" class="receipt-preview-panel hidden">
+          <div class="receipt-split">
+            <div class="receipt-img-box receipt-img-interactive">
+              <img id="receipt-thumb" alt="Uploaded receipt preview" title="Click to zoom / inspect image" />
+              <button type="button" class="btn btn-ghost small rc-expand-thumb-btn" id="rc-expand-thumb-btn" data-i18n="btnZoomView">🔍 Zoom / Inspect</button>
+            </div>
+            <form id="receipt-confirm-form" class="receipt-extracted-form">
+              <input type="hidden" id="rc-path" />
+              <div id="rc-source-badge" class="rc-source-badge hidden"></div>
+              <div class="form-grid-2">
+                <label class="field">
+                  <span data-i18n="typeLabel">Type</span>
+                  <select id="rc-type">
+                    <option value="expense" data-i18n="txTabExpense">💸 Outgoing (Out)</option>
+                    <option value="income" data-i18n="txTabIncome">💰 Income (In)</option>
+                    <option value="transfer" data-i18n="txTabTransfer">⇄ Transfer</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span data-i18n="merchantCounterpartyLabel">Merchant / Partner</span>
+                  <input id="rc-merchant" type="text" required />
+                </label>
+              </div>
+              <div class="form-grid-2">
+                <label class="field">
+                  <span data-i18n="dateLabel">Date</span>
+                  <input id="rc-date" type="date" required />
+                </label>
+                <label class="field">
+                  <span data-i18n="timeLabel">Time (optional)</span>
+                  <input id="rc-time" type="time" />
+                </label>
+              </div>
+              <div class="form-grid-2">
+                <label class="field">
+                  <span data-i18n="amountLabel">Amount</span>
+                  <div class="input-with-addon">
+                    <input id="rc-amount" type="number" step="0.01" min="0.01" required />
+                    <select id="rc-currency">
+                      <option value="HUF">HUF</option>
+                      <option value="EUR">EUR</option>
+                      <option value="USD">USD</option>
+                      <option value="GBP">GBP</option>
+                    </select>
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="categoryLabel">Category</span>
+                  <select id="rc-category"></select>
+                </label>
+              </div>
+              <label class="field hidden" id="rc-dest-pocket-wrap">
+                <span data-i18n="destPocketLabel">Destination Bank &amp; Pocket</span>
+                <select id="rc-dest-pocket"></select>
+              </label>
+              <label class="field">
+                <span data-i18n="storeAddressLabel">Store Address (optional)</span>
+                <input id="rc-address" type="text" data-i18n-placeholder="phStoreAddress" placeholder="e.g. 123 Main Street, Sample City" />
+              </label>
+              <div id="rc-attach-merge-box" class="rc-attach-merge-box hidden">
+                <div class="rc-merge-header">
+                  <div>
+                    <strong data-i18n="attachCompareTitle">Existing Transaction vs Scanned Receipt</strong>
+                    <div class="muted small" data-i18n="attachCompareSub">Existing values are kept unless you switch individual fields below.</div>
+                  </div>
+                  <div class="rc-merge-actions">
+                    <button type="button" class="btn btn-ghost small" id="rc-keep-all-btn" data-i18n="btnKeepAllOrig">Keep Original</button>
+                    <button type="button" class="btn btn-secondary small" id="rc-use-all-receipt-btn" data-i18n="btnApplyReceiptAll">Use All Receipt</button>
+                  </div>
+                </div>
+                <div id="rc-diff-rows" class="rc-diff-rows"></div>
+              </div>
+              <div id="rc-note-strategy-box" class="rc-note-strategy-box hidden">
+                <span class="rc-strategy-label" data-i18n="noteStrategyLabel">Note Update Option</span>
+                <div class="rc-strategy-pills">
+                  <button type="button" class="btn btn-ghost small rc-strategy-pill" data-note-strategy="keep" data-i18n="noteStrategyKeep">Keep Original</button>
+                  <button type="button" class="btn btn-ghost small rc-strategy-pill" data-note-strategy="expand" data-i18n="noteStrategyExpand">Expand Original + Receipt</button>
+                  <button type="button" class="btn btn-ghost small rc-strategy-pill" data-note-strategy="receipt" data-i18n="noteStrategyReceipt">Use Receipt Note</button>
+                </div>
+              </div>
+              <label class="field">
+                <span data-i18n="autoGeneratedNoteLabel">Auto-Generated Note (edit to make manual)</span>
+                <textarea id="rc-note" rows="2"></textarea>
+              </label>
+              <div id="rc-items-box" class="rc-items-box"></div>
+              <div class="modal-footer-inline">
+                <button type="button" class="btn btn-ghost" id="rc-rescan" data-i18n="uploadAnother">Upload Another</button>
+                <button type="submit" class="btn btn-primary" id="rc-submit-btn" data-i18n="confirmAddLedger">Confirm &amp; Add to Ledger</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: RECEIPT IMAGE VIEWER -->
+  <dialog id="receipt-view-modal" class="modal">
+    <div class="modal-card modal-wide receipt-view-card">
+      <div class="modal-header">
+        <h3 id="rv-title" data-i18n="receiptViewTitle">Receipt Details</h3>
+        <button type="button" class="btn btn-icon" data-close="receipt-view-modal">✕</button>
+      </div>
+      <div class="modal-body receipt-split receipt-view-split">
+        <div class="receipt-viewer-pane">
+          <div class="viewer-toolbar" id="rv-toolbar">
+            <button type="button" class="btn btn-ghost small" id="rv-zoom-out" title="Zoom out">－</button>
+            <button type="button" class="btn btn-ghost small viewer-zoom-readout" id="rv-zoom-reset" title="Reset view">100%</button>
+            <button type="button" class="btn btn-ghost small" id="rv-zoom-in" title="Zoom in">＋</button>
+            <button type="button" class="btn btn-ghost small" id="rv-rotate-left" title="Rotate left">↺</button>
+            <button type="button" class="btn btn-ghost small" id="rv-rotate-right" title="Rotate right">↻</button>
+            <button type="button" class="btn btn-ghost small" id="rv-fullscreen-btn" data-i18n="btnFullscreen">⛶ Fullscreen</button>
+            <a class="btn btn-ghost small" id="rv-download-btn" download data-i18n="btnDownloadImage">⬇ Save</a>
+          </div>
+          <div class="viewer-stage" id="rv-stage">
+            <img id="rv-img" alt="Stored receipt" draggable="false" />
+          </div>
+          <div class="viewer-hint muted small" data-i18n="viewerInteractHint">Scroll or double-click to zoom · Drag to pan · Rotate if sideways</div>
+        </div>
+        <div class="receipt-details-pane">
+          <p id="rv-meta" class="muted small"></p>
+          <p id="rv-address" class="muted small hidden"></p>
+          <p id="rv-note"></p>
+          <h4 data-i18n="extractedItemsTitle">Extracted Items</h4>
+          <ul id="rv-items" class="items-list"></ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="rv-replace-receipt-btn" class="btn btn-secondary small" data-i18n="btnReplaceReceipt">📷 Replace / Re-Scan Receipt</button>
+        <button type="button" id="rv-edit-note-btn" class="btn btn-ghost small" data-i18n="btnEditNote">✏️ Edit Note</button>
+        <button type="button" class="btn btn-primary" data-close="receipt-view-modal" data-i18n="btnDone">✅ Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: FULLSCREEN IMAGE LIGHTBOX -->
+  <dialog id="image-lightbox-modal" class="modal image-lightbox-modal">
+    <div class="lightbox-card">
+      <div class="lightbox-topbar">
+        <span id="lb-title" class="lightbox-title">Receipt Image</span>
+        <div class="viewer-toolbar" id="lb-toolbar">
+          <button type="button" class="btn btn-ghost small" id="lb-zoom-out" title="Zoom out">－</button>
+          <button type="button" class="btn btn-ghost small viewer-zoom-readout" id="lb-zoom-reset" title="Reset view">100%</button>
+          <button type="button" class="btn btn-ghost small" id="lb-zoom-in" title="Zoom in">＋</button>
+          <button type="button" class="btn btn-ghost small" id="lb-rotate-left" title="Rotate left">↺</button>
+          <button type="button" class="btn btn-ghost small" id="lb-rotate-right" title="Rotate right">↻</button>
+          <a class="btn btn-ghost small" id="lb-download-btn" download data-i18n="btnDownloadImage">⬇ Save</a>
+          <button type="button" class="btn btn-icon" data-close="image-lightbox-modal" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <div class="viewer-stage lightbox-stage" id="lb-stage">
+        <img id="lb-img" alt="Fullscreen receipt viewer" draggable="false" />
+      </div>
+      <div class="lightbox-bottomhint muted small" data-i18n="viewerInteractHint">Scroll or double-click to zoom · Drag to pan · Rotate if sideways</div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: EDIT TRANSACTION NOTE -->
+  <dialog id="note-modal" class="modal">
+    <form id="note-form" class="modal-card modal-medium" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="noteModalTitle">✏️ Edit Transaction Note</h3>
+          <p id="note-modal-sub" class="modal-subtitle muted small"></p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="note-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="note-tx-id" />
+        <label class="field">
+          <span data-i18n="thNote">Note</span>
+          <textarea id="note-modal-input" rows="4" data-i18n-placeholder="phTxNote" placeholder="Write a manual note, or leave empty for smart auto-generated note..."></textarea>
+        </label>
+        <div id="note-modal-items-hint" class="rc-items-box hidden"></div>
+        <div class="row-actions" style="margin-top:10px;">
+          <button type="button" id="btn-note-regen-auto" class="btn btn-secondary small" data-i18n="btnRegenAutoNote">✨ Auto-Generate Note</button>
+          <button type="button" id="btn-note-attach-receipt" class="btn btn-ghost small" data-i18n="btnAttachReceipt">📷 Attach / Scan Receipt</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="note-modal" data-i18n="cancel">Cancel</button>
+        <button type="submit" id="btn-note-save" class="btn btn-primary" data-i18n="btnSaveNote">💾 Save Note</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL: IMPORT BACKUP OR SPREADSHEET -->
+  <dialog id="import-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="importModalTitle">📥 Import Data / Restore Backup</h3>
+          <p class="modal-subtitle muted small" data-i18n="importModalSub">Restore a lossless MoneyManager JSON backup or import CSV / Excel spreadsheets.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="import-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted small" data-i18n-html="importModalDescHtml">
+          Upload a <strong>MoneyManager Backup (.json)</strong> to restore accounts, pockets, categories, recipients, receipts, and transactions losslessly, or import a <strong>CSV (.csv)</strong> / <strong>Excel (.xlsx)</strong> spreadsheet.
+        </p>
+
+        <div class="import-upload-row">
+          <input id="import-file-input" type="file" accept=".json,.gz,.json.gz,.xlsx,.csv,.tsv,application/json,application/gzip,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        </div>
+
+        <div id="import-json-step" class="hidden" style="margin-top:12px;">
+          <div id="import-json-summary" class="status-banner"></div>
+          <label class="field" style="margin-top:10px;">
+            <span data-i18n="backupRestoreModeLabel">Restore Mode</span>
+            <select id="import-backup-mode">
+              <option value="replace" data-i18n="backupModeReplace">Full Restore (Replace existing accounts, categories &amp; ledger)</option>
+              <option value="merge" data-i18n="backupModeMerge">Merge with existing data (Keep current entries)</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="import-step2" class="hidden">
+          <div class="form-grid-3">
+            <label class="field">
+              <span data-i18n="worksheetTab">Worksheet Tab</span>
+              <select id="import-sheet-select"></select>
+            </label>
+            <label class="field">
+              <span data-i18n="fallbackBankPocket">Fallback Bank &amp; Pocket</span>
+              <select id="import-default-pocket"></select>
+            </label>
+            <label class="field">
+              <span data-i18n="unsignedAmountMode">Unsigned Amount Mode</span>
+              <select id="import-default-type">
+                <option value="auto" data-i18n="importAutoDetect">Auto-detect from Type/Category</option>
+                <option value="expense" data-i18n="importTreatExpense">Treat unsigned positive rows as Outgoing</option>
+                <option value="income" data-i18n="importTreatIncome">Treat unsigned positive rows as Income</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="toggle-row small" style="margin: 8px 0 12px;">
+            <input type="checkbox" id="import-mark-historical" />
+            <span data-i18n="importMarkHistoricalLabel">🏛️ Mark imported transactions as historical (unless mapped from column)</span>
+          </label>
+
+          <h4 data-i18n="columnMappingTitle">Column Mapping</h4>
+          <div id="import-mapping-grid" class="mapping-grid"></div>
+
+          <h4><span data-i18n="previewLabel">Preview</span> (<span id="import-total-rows">0</span>)</h4>
+          <div class="table-wrap table-preview">
+            <table class="ledger-table small-table">
+              <thead id="import-preview-thead"></thead>
+              <tbody id="import-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="import-result" class="status-banner hidden"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="import-modal" data-i18n="close">Close</button>
+        <button type="button" class="btn btn-primary hidden" id="btn-commit-backup" data-i18n="btnRestoreBackup">Restore Backup</button>
+        <button type="button" class="btn btn-primary hidden" id="btn-commit-import" data-i18n="btnImportHistorical">Import Transactions</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: ADD / EDIT POCKET -->
+  <dialog id="pocket-modal" class="modal">
+    <form id="pocket-form" class="modal-card" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 id="pocket-modal-title" data-i18n="addPocket">Add Pocket</h3>
+          <p class="modal-subtitle muted small" data-i18n="pocketModalSub">Pockets let you separate savings or budgets inside a bank account.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="pocket-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="pm-pocket-id" />
+        <input type="hidden" id="pm-account-id" />
+        <label class="field">
+          <span data-i18n="pocketName">Pocket Name</span>
+          <input id="pm-name" type="text" required data-i18n-placeholder="phPocketName" placeholder="e.g. Main, Savings, Reserve" />
+        </label>
+        <div class="form-grid-2">
+          <label class="field">
+            <span data-i18n="currencyLabel">Currency</span>
+            <select id="pm-currency">
+              <option value="HUF">HUF (Ft)</option>
+              <option value="EUR">EUR (€)</option>
+              <option value="USD">USD ($)</option>
+              <option value="GBP">GBP (£)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span data-i18n="startingBalance">Starting Balance</span>
+            <input id="pm-initial" type="number" step="0.01" value="0" />
+          </label>
+        </div>
+        <div class="form-grid-2">
+          <label class="field">
+            <span data-i18n="colorAccent">Color Accent</span>
+            <input id="pm-color" type="color" value="#6366f1" />
+          </label>
+          <label class="toggle-row" style="padding-top:18px;">
+            <input type="checkbox" id="pm-default" />
+            <span data-i18n="defaultPocketBank">Default pocket for this bank</span>
+          </label>
+        </div>
+        <label class="toggle-row hidden" id="pm-archived-wrap">
+          <input type="checkbox" id="pm-archived" />
+          <span data-i18n="hideMarkUnused">Hide / Mark as unused (keeps all transactions in the log)</span>
+        </label>
+        <div id="pm-danger-zone" class="danger-box hidden">
+          <div class="danger-zone-title" data-i18n="dangerZoneTitle">Remove or Hide</div>
+          <label class="field">
+            <span data-i18n="deleteHideAction">Delete / Hide Action:</span>
+            <select id="pm-delete-move">
+              <option value="archive" data-i18n="optArchive">Hide / Mark as Unused (keeps transactions in log)</option>
+              <option value="purge" data-i18n="optPurgePocket">Permanently delete pocket AND its transactions</option>
+            </select>
+          </label>
+          <button type="button" id="pm-delete-btn" class="btn btn-danger small" data-i18n="btnDeleteHidePocket">🗑️ Delete / Hide Pocket</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="pocket-modal" data-i18n="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="pm-save-btn" data-i18n="createPocket">Create Pocket</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL: SYNC / SET POCKET BALANCE -->
+  <dialog id="sync-modal" class="modal">
+    <form id="sync-form" class="modal-card" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="syncModalTitle">Sync Live Pocket Balance</h3>
+          <p class="modal-subtitle muted small" data-i18n="syncModalSub">Match your tracked pocket balance to your real-world banking app.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="sync-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sync-pocket-id" />
+        <p id="sync-pocket-desc" class="muted small"></p>
+        <label class="field">
+          <span><span data-i18n="realWorldBalanceLabel">Real-World Balance</span> (<span id="sync-currency-label">HUF</span>)</span>
+          <input id="sync-balance" type="number" step="0.01" required />
+        </label>
+        <label class="field">
+          <span data-i18n="syncModeLabel">Sync Mode</span>
+          <select id="sync-mode">
+            <option value="sync" data-i18n="syncModeAnchor">Anchor live balance from today (keeps old imported history intact)</option>
+            <option value="initial" data-i18n="syncModeInitial">Set initial opening balance (before all transactions)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span data-i18n="effectiveDateTime">Effective Date &amp; Time</span>
+          <input id="sync-date" type="datetime-local" required />
+        </label>
+        <label class="field">
+          <span data-i18n="noteOptional">Note (optional)</span>
+          <input id="sync-note" type="text" data-i18n-placeholder="phSyncNote" placeholder="e.g. Verified against banking app" />
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="sync-modal" data-i18n="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" data-i18n="applyBalance">Apply Balance</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL: ADD / EDIT BANK -->
+  <dialog id="bank-modal" class="modal">
+    <form id="bank-form" class="modal-card" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 id="bank-modal-title" data-i18n="addBank">Add Bank Account</h3>
+          <p class="modal-subtitle muted small" data-i18n="bankModalSub">Manage the bank name, main currency, and brand color.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="bank-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="bm-account-id" />
+        <label class="field">
+          <span data-i18n="bankName">Bank Name</span>
+          <input id="bm-name" type="text" required data-i18n-placeholder="phBankName" placeholder="e.g. Wise, K&amp;H, Raiffeisen" />
+        </label>
+        <div class="form-grid-2">
+          <label class="field">
+            <span data-i18n="primaryCurrency">Primary Currency</span>
+            <select id="bm-currency">
+              <option value="HUF">HUF</option>
+              <option value="EUR">EUR</option>
+              <option value="USD">USD</option>
+              <option value="GBP">GBP</option>
+            </select>
+          </label>
+          <label class="field" id="bm-initial-wrap">
+            <span data-i18n="initialMainBal">Initial Main Pocket Balance</span>
+            <input id="bm-initial" type="number" step="0.01" value="0" />
+          </label>
+        </div>
+        <label class="field">
+          <span data-i18n="brandColor">Brand Color</span>
+          <input id="bm-color" type="color" value="#0ea5e9" />
+        </label>
+        <label class="toggle-row hidden" id="bm-archived-wrap">
+          <input type="checkbox" id="bm-archived" />
+          <span data-i18n="hideMarkBankUnused">Hide / Mark bank as unused (keeps all transactions in the log)</span>
+        </label>
+        <div id="bm-danger-zone" class="danger-box hidden">
+          <div class="danger-zone-title" data-i18n="dangerZoneTitle">Remove or Hide</div>
+          <label class="field">
+            <span data-i18n="deleteHideAction">Delete / Hide Action:</span>
+            <select id="bm-delete-move">
+              <option value="archive" data-i18n="optArchive">Hide / Mark as Unused (keeps transactions in log)</option>
+              <option value="purge" data-i18n="optPurgeBank">Permanently delete bank, pockets &amp; all transactions</option>
+            </select>
+          </label>
+          <button type="button" id="bm-delete-btn" class="btn btn-danger small" data-i18n="btnDeleteHideBank">🗑️ Delete / Hide Bank</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="bank-modal" data-i18n="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="bm-save-btn" data-i18n="createBank">Create Bank</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL: EDIT SAVED ORIGIN / DESTINATION -->
+  <dialog id="cp-edit-modal" class="modal">
+    <form id="cp-edit-form" class="modal-card modal-medium" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 id="cp-edit-modal-title" data-i18n="editDestinationTitle">Edit Saved Destination</h3>
+          <p class="modal-subtitle muted small" data-i18n="cpEditModalSub">Modify the saved name or default category.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="cp-edit-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="cpm-id" />
+        <input type="hidden" id="cpm-direction" />
+        <input type="hidden" id="cpm-old-name" />
+        <input type="hidden" id="cpm-tx-count" />
+        <label class="field">
+          <span data-i18n="cpNameLabel">Name</span>
+          <input id="cpm-name" type="text" required />
+        </label>
+        <label class="field">
+          <span data-i18n="cpDefaultCategoryLabel">Default Category</span>
+          <select id="cpm-category"></select>
+        </label>
+        <label class="toggle-row" id="cpm-update-prev-wrap" style="margin-top:6px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elevated);">
+          <input type="checkbox" id="cpm-update-prev" />
+          <span id="cpm-update-prev-label" data-i18n="cpUpdatePrevLabel">Also modify in previous entries</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="cp-edit-modal" data-i18n="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="cpm-save-btn" data-i18n="btnSaveChanges">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL: MANAGE ACCOUNTS, POCKETS & SAVED ORIGINS/DESTINATIONS -->
+  <dialog id="manage-accounts-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="manageModalTitle">⚙️ Manage Accounts, Pockets &amp; Saved Predictions</h3>
+          <p class="modal-subtitle muted small" data-i18n="manageModalSub">Add, edit, or hide banks and pockets, and manage your saved autocomplete names.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="manage-accounts-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="manage-accounts-body" class="manage-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-close="manage-accounts-modal" data-i18n="btnDone">✅ Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: SETTINGS & BACKUP -->
+  <dialog id="settings-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="settingsModalTitle">⚙️ Settings, Gemini OCR &amp; Backups</h3>
+          <p class="modal-subtitle muted small" data-i18n="settingsModalSub">Customize theme colors, exchange rates, categories, receipt OCR, and backups.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="settings-modal">✕</button>
+      </div>
+      <div class="settings-tabs-bar" role="tablist">
+        <button type="button" class="btn small settings-tab-btn active" id="settings-tab-btn-general" data-settings-tab="general" data-i18n="settingsTabGeneral">⚙️ App Settings</button>
+        <button type="button" class="btn small settings-tab-btn" id="settings-tab-btn-data" data-settings-tab="data" data-i18n="settingsTabData">🏦 Banks, Pockets &amp; Recipients</button>
+        <button type="button" class="btn small settings-tab-btn" id="settings-tab-btn-backups" data-settings-tab="backups" data-i18n="settingsTabBackups">💾 Scheduled Backups</button>
+      </div>
+      <div id="settings-tab-general" class="modal-body settings-grid">
+        <div class="settings-col">
+          <form id="settings-gemini-form" class="settings-panel">
+            <h4 data-i18n="geminiPanelTitle">Gemini Receipt Vision API</h4>
+            <p class="muted small">
+              <span data-i18n="geminiPanelDescPrefix">Used to read receipt photos and write smart notes. Status:</span> <strong id="set-gemini-status">Not set</strong>
+            </p>
+            <label class="field">
+              <span data-i18n="geminiKeyLabel">Gemini API Key (leave blank to keep existing)</span>
+              <input id="set-gemini-key" type="password" autocomplete="off" placeholder="AIza..." />
+            </label>
+            <label class="field">
+              <span data-i18n="modelLabel">Model</span>
+              <select id="set-gemini-model">
+                <option value="gemini-4-hydrogen">gemini-4-hydrogen</option>
+                <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+                <option value="gemini-4-argon">gemini-4-argon</option>
+                <option value="gemini-4-carbon">gemini-4-carbon</option>
+              </select>
+            </label>
+            <div class="row-actions">
+              <button type="submit" class="btn btn-primary small" data-i18n="btnSaveGemini">Save Gemini Settings</button>
+              <button type="button" id="btn-test-gemini" class="btn btn-secondary small" data-i18n="btnTestConnection">Test Connection</button>
+            </div>
+            <p id="set-gemini-msg" class="small muted"></p>
+            <div id="settings-gemini-quota" class="vision-quota-card"></div>
+          </form>
+
+          <form id="settings-fx-form" class="settings-panel">
+            <h4 data-i18n="fxPanelTitle">Multi-Currency FX Rates (to HUF)</h4>
+            <div class="form-grid-3">
+              <label class="field">
+                <span>1 EUR = HUF</span>
+                <input id="fx-eur" type="number" step="0.01" required />
+              </label>
+              <label class="field">
+                <span>1 USD = HUF</span>
+                <input id="fx-usd" type="number" step="0.01" required />
+              </label>
+              <label class="field">
+                <span>1 GBP = HUF</span>
+                <input id="fx-gbp" type="number" step="0.01" required />
+              </label>
+            </div>
+            <div class="row-actions">
+              <button type="submit" class="btn btn-primary small" data-i18n="btnSaveRates">Save Rates</button>
+              <button type="button" id="btn-refresh-fx" class="btn btn-secondary small" data-i18n="btnRefreshFx">Refresh Live FX</button>
+            </div>
+            <p id="set-fx-msg" class="small muted"></p>
+          </form>
+
+          <form id="settings-password-form" class="settings-panel">
+            <h4 data-i18n="securityBackupTitle">Security &amp; Backup</h4>
+            <div class="form-grid-2">
+              <label class="field">
+                <span data-i18n="currentPasswordLabel">Current Password</span>
+                <input id="pw-current" type="password" autocomplete="current-password" required />
+              </label>
+              <label class="field">
+                <span data-i18n="newPasswordLabel">New Password</span>
+                <input id="pw-new" type="password" autocomplete="new-password" minlength="6" required />
+              </label>
+            </div>
+            <div class="row-actions">
+              <button type="submit" class="btn btn-secondary small" data-i18n="btnUpdatePassword">Update Password</button>
+              <button type="button" id="btn-open-import" class="btn btn-ghost small" data-i18n="btnImportSheet">📥 Import Sheet</button>
+              <a href="api/export/csv" class="btn btn-ghost small" download data-i18n="btnExportCsv">Export CSV</a>
+              <a href="api/export/json" class="btn btn-ghost small" download data-i18n="btnExportJson">Export JSON Backup</a>
+            </div>
+            <p id="set-password-msg" class="small muted"></p>
+            <label class="toggle-row small" style="margin-top:10px;">
+              <input type="checkbox" id="settings-hide-historical" />
+              <span data-i18n="editHideHistorical">Hide historical transactions</span>
+            </label>
+            <div class="session-timeout-box" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">
+              <label class="field" style="margin-bottom:6px;">
+                <span data-i18n="sessionTimeoutLabel">Auto-Logout Session Timeout (minutes of inactivity)</span>
+                <div class="input-with-addon">
+                  <input id="set-session-timeout" type="number" min="1" max="1440" step="1" value="10" />
+                  <button type="button" id="btn-save-session-timeout" class="btn btn-secondary small" data-i18n="btnSaveTimeout">Save Timeout</button>
+                </div>
+              </label>
+              <p id="set-timeout-msg" class="small muted" style="margin:0;"></p>
+            </div>
+          </form>
+        </div>
+
+        <div class="settings-col">
+          <div id="settings-palette-panel" class="settings-panel"></div>
+
+          <div id="settings-notifications-panel" class="settings-panel">
+            <h4 data-i18n="notifPanelTitle">📲 Bank App Notification Auto-Logger</h4>
+            <p class="muted small" data-i18n="notifPanelDesc">Automatically log mobile banking and digital wallet notifications via webhook. Every auto-logged item is labeled "Needs Approval" so you can review it.</p>
+            <div class="webhook-url-row">
+              <label class="field" style="flex:1;">
+                <span data-i18n="notifWebhookLabel">Webhook Endpoint URL (POST JSON)</span>
+                <input id="set-webhook-url" type="text" readonly />
+              </label>
+              <div class="row-actions">
+                <button type="button" id="btn-copy-webhook" class="btn btn-secondary small" data-i18n="btnCopyUrl">📋 Copy URL</button>
+                <button type="button" id="btn-rotate-webhook" class="btn btn-ghost small" data-i18n="btnRotateToken">🔄 New Token</button>
+              </div>
+            </div>
+            <p class="muted small" data-i18n="notifPhoneSetupHint">Android (MacroDroid / Tasker / Notification Forwarder) or iOS Shortcuts: send a POST JSON request with app, title, and text to the URL above.</p>
+            <div class="webhook-url-row">
+              <label class="field" style="flex:1;">
+                <span data-i18n="macrodroidBodyLabel">MacroDroid Content Body (HTTP Request -> POST -> application/json)</span>
+                <input id="set-macrodroid-body" type="text" readonly value='{"app":"{not_app_name}","title":"{not_title}","text":"{notification}","subText":"{not_sub_text}"}' />
+              </label>
+              <div class="row-actions">
+                <button type="button" id="btn-copy-macrodroid" class="btn btn-secondary small" data-i18n="btnCopyMacrodroid">📋 Copy Body</button>
+              </div>
+            </div>
+            <div class="pwa-push-box" id="pwa-push-box" style="margin-bottom:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elevated);">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <strong data-i18n="pwaPushTitle">🔔 PWA Push Alerts (Auto-Logged Events)</strong>
+                <span id="pwa-push-status" class="muted small"></span>
+              </div>
+              <p class="muted small" style="margin:0 0 8px;" data-i18n="pwaPushDesc">Receive a native PWA push notification on this device whenever a transaction is auto-logged (via bank webhook or receipt scan).</p>
+              <div class="row-actions">
+                <button type="button" id="btn-push-enable" class="btn btn-primary small" data-i18n="btnPushEnable">🔔 Enable PWA Alerts</button>
+                <button type="button" id="btn-push-disable" class="btn btn-ghost small hidden" data-i18n="btnPushDisable">🔕 Disable Alerts</button>
+                <button type="button" id="btn-push-test" class="btn btn-secondary small hidden" data-i18n="btnPushTest">📲 Send Test Alert</button>
+              </div>
+            </div>
+            <div id="notif-webhook-logs" class="webhook-logs-box"></div>
+            <div class="notif-test-box">
+              <div class="form-grid-2">
+                <label class="field">
+                  <span data-i18n="notifTestAppLabel">Banking App (optional)</span>
+                  <select id="notif-test-app">
+                    <option value="" data-i18n="notifAppAuto">Auto-detect from text</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span data-i18n="notifSamplePresetsLabel">Quick Test Presets</span>
+                  <div class="row-actions">
+                    <button type="button" class="btn btn-ghost small" id="btn-sample-expense" data-i18n="presetCardExpense">Card Expense</button>
+                    <button type="button" class="btn btn-ghost small" id="btn-sample-income" data-i18n="presetIncomingTransfer">Incoming Transfer</button>
+                    <button type="button" class="btn btn-ghost small" id="btn-sample-transfer" data-i18n="presetPocketTransfer">Pocket Transfer</button>
+                  </div>
+                </label>
+              </div>
+              <label class="field">
+                <span data-i18n="notifPasteLabel">Paste or Test Bank Notification Text</span>
+                <textarea id="notif-test-text" rows="2" data-i18n-placeholder="phNotifTest" placeholder="e.g. Card purchase: 8,450 HUF, Supermarket, Balance: 245,100 HUF"></textarea>
+              </label>
+              <div class="row-actions">
+                <button type="button" id="btn-test-notif" class="btn btn-primary small" data-i18n="btnParseLogNotif">📲 Parse &amp; Auto-Log Notification</button>
+              </div>
+              <p id="set-notif-msg" class="small muted"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="settings-tab-data" class="modal-body settings-grid hidden">
+        <div class="settings-col">
+          <div id="settings-banks-pockets-panel" class="settings-panel"></div>
+        </div>
+        <div class="settings-col">
+          <div id="settings-recipients-panel" class="settings-panel"></div>
+          <div id="settings-categories-panel" class="settings-panel"></div>
+        </div>
+      </div>
+      <div id="settings-tab-backups" class="modal-body settings-grid hidden">
+        <div class="settings-col">
+          <form id="backup-schedule-form" class="settings-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+              <h4 style="margin:0;" data-i18n="backupScheduleTitle">⏰ Automatic Schedule &amp; Format</h4>
+              <span id="bk-next-run-pill" class="backup-status-pill muted"></span>
+            </div>
+            <label class="toggle-row" style="margin-bottom:10px;">
+              <input type="checkbox" id="bk-enabled" />
+              <span data-i18n="bkEnableSchedule">Enable built-in scheduled backups</span>
+            </label>
+            <div class="form-grid-2">
+              <label class="field">
+                <span data-i18n="bkFrequencyLabel">Frequency</span>
+                <select id="bk-schedule-type">
+                  <option value="daily" data-i18n="bkFreqDaily">Daily</option>
+                  <option value="weekly" data-i18n="bkFreqWeekly">Weekly</option>
+                  <option value="interval" data-i18n="bkFreqInterval">Every N hours</option>
+                </select>
+              </label>
+              <label class="field" id="bk-time-wrap">
+                <span data-i18n="bkTimeLabel">Run Time (local)</span>
+                <input id="bk-time" type="time" value="03:00" />
+              </label>
+              <label class="field hidden" id="bk-weekday-wrap">
+                <span data-i18n="bkWeekdayLabel">Day of Week</span>
+                <select id="bk-weekday">
+                  <option value="0" data-i18n="dowSun">Sunday</option>
+                  <option value="1" data-i18n="dowMon">Monday</option>
+                  <option value="2" data-i18n="dowTue">Tuesday</option>
+                  <option value="3" data-i18n="dowWed">Wednesday</option>
+                  <option value="4" data-i18n="dowThu">Thursday</option>
+                  <option value="5" data-i18n="dowFri">Friday</option>
+                  <option value="6" data-i18n="dowSat">Saturday</option>
+                </select>
+              </label>
+              <label class="field hidden" id="bk-interval-wrap">
+                <span data-i18n="bkIntervalHoursLabel">Every (hours)</span>
+                <input id="bk-interval-hours" type="number" min="1" max="720" step="1" value="24" />
+              </label>
+            </div>
+            <div class="form-grid-2" style="margin-top:4px;">
+              <label class="toggle-row small">
+                <input type="checkbox" id="bk-compress" checked />
+                <span data-i18n="bkCompressLabel">Compress with gzip (.json.gz)</span>
+              </label>
+              <label class="toggle-row small">
+                <input type="checkbox" id="bk-include-receipts" checked />
+                <span data-i18n="bkIncludeReceiptsLabel">Include receipt images</span>
+              </label>
+            </div>
+            <div id="bk-last-run-info" class="muted small" style="margin:8px 0;"></div>
+            <div class="row-actions">
+              <button type="submit" id="btn-bk-save" class="btn btn-primary small" data-i18n="btnBkSave">💾 Save Backup Settings</button>
+              <button type="button" id="btn-bk-run-now" class="btn btn-secondary small" data-i18n="btnBkRunNow">▶️ Run Backup Now</button>
+            </div>
+            <p id="bk-main-msg" class="small muted" style="margin:6px 0 0;"></p>
+          </form>
+
+          <div class="settings-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+              <h4 style="margin:0;" data-i18n="bkLocalTitle">📁 Local Backups &amp; Retention</h4>
+              <span id="bk-local-summary" class="muted small"></span>
+            </div>
+            <label class="toggle-row" style="margin-bottom:8px;">
+              <input type="checkbox" id="bk-local-enabled" checked />
+              <span data-i18n="bkLocalEnable">Save scheduled backups locally on disk</span>
+            </label>
+            <label class="field">
+              <span data-i18n="bkLocalDirLabel">Local Folder Path (leave blank for default ./data/backups)</span>
+              <input id="bk-local-dir" type="text" data-i18n-placeholder="phBkLocalDir" placeholder="Default: ./data/backups" />
+              <small id="bk-local-resolved" class="muted"></small>
+            </label>
+            <div class="retention-grid">
+              <label class="field">
+                <span data-i18n="bkMaxCountLabel">Max Backups (0 = ∞)</span>
+                <input id="bk-local-max-count" type="number" min="0" max="10000" step="1" value="14" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkMaxSizeLabel">Max Total Size (MB, 0 = ∞)</span>
+                <input id="bk-local-max-size" type="number" min="0" max="1048576" step="1" value="250" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkMaxAgeLabel">Max Age (Days, 0 = ∞)</span>
+                <input id="bk-local-max-age" type="number" min="0" max="36500" step="1" value="30" />
+              </label>
+            </div>
+            <div class="row-actions" style="margin-top:8px;margin-bottom:8px;">
+              <button type="button" id="btn-bk-run-local" class="btn btn-ghost small" data-i18n="btnBkRunLocal">💾 Backup Locally Now</button>
+            </div>
+            <div id="bk-local-list" class="backup-file-list"></div>
+          </div>
+        </div>
+
+        <div class="settings-col">
+          <div class="settings-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+              <h4 style="margin:0;" data-i18n="bkRemoteTitle">🌐 Remote Backups &amp; Retention</h4>
+              <div id="bk-capabilities" class="capability-badges"></div>
+            </div>
+            <label class="toggle-row" style="margin-bottom:8px;">
+              <input type="checkbox" id="bk-remote-enabled" />
+              <span data-i18n="bkRemoteEnable">Upload scheduled backups to remote server / NAS</span>
+            </label>
+            <div class="form-grid-3">
+              <label class="field">
+                <span data-i18n="bkProtocolLabel">Protocol</span>
+                <select id="bk-remote-protocol">
+                  <option value="sftp">SFTP (SSH)</option>
+                  <option value="ftp">FTP</option>
+                  <option value="ftps">FTPS (TLS)</option>
+                  <option value="smb">SMB / CIFS Share</option>
+                </select>
+              </label>
+              <label class="field">
+                <span data-i18n="bkHostLabel">Host / IP</span>
+                <input id="bk-remote-host" type="text" placeholder="192.168.1.10" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkPortLabel">Port</span>
+                <input id="bk-remote-port" type="number" min="1" max="65535" step="1" value="22" />
+              </label>
+            </div>
+            <div id="bk-ftps-row" class="form-grid-2 hidden">
+              <label class="field">
+                <span data-i18n="bkFtpsModeLabel">FTPS TLS Mode</span>
+                <select id="bk-remote-ftps-mode">
+                  <option value="explicit" data-i18n="bkFtpsExplicit">Explicit TLS (Port 21)</option>
+                  <option value="implicit" data-i18n="bkFtpsImplicit">Implicit TLS (Port 990)</option>
+                </select>
+              </label>
+            </div>
+            <div id="bk-smb-row" class="form-grid-2 hidden">
+              <label class="field">
+                <span data-i18n="bkSmbShareLabel">SMB Share Name</span>
+                <input id="bk-remote-share" type="text" placeholder="Backups" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkSmbDomainLabel">Workgroup / Domain (optional)</span>
+                <input id="bk-remote-domain" type="text" placeholder="WORKGROUP" />
+              </label>
+            </div>
+            <label class="field">
+              <span data-i18n="bkRemotePathLabel">Remote Folder Path</span>
+              <input id="bk-remote-path" type="text" placeholder="/moneymanager-backups" />
+            </label>
+            <div class="form-grid-2">
+              <label class="field">
+                <span data-i18n="bkUsernameLabel">Username</span>
+                <input id="bk-remote-user" type="text" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkPasswordLabel">Password <small id="bk-pass-hint" class="muted"></small></span>
+                <div class="input-with-addon">
+                  <input id="bk-remote-pass" type="password" autocomplete="new-password" data-i18n-placeholder="phBkKeepSecret" placeholder="Leave blank to keep saved" />
+                  <button type="button" id="btn-bk-clear-pass" class="btn btn-ghost small" title="Clear saved password">✕</button>
+                </div>
+              </label>
+            </div>
+            <div id="bk-sftp-auth-row" class="hidden">
+              <label class="field">
+                <span data-i18n="bkSftpAuthLabel">SFTP Authentication</span>
+                <select id="bk-remote-auth-method">
+                  <option value="password" data-i18n="bkAuthPassword">Password</option>
+                  <option value="key" data-i18n="bkAuthKey">SSH Private Key</option>
+                </select>
+              </label>
+              <label class="field hidden" id="bk-ssh-key-wrap">
+                <span data-i18n="bkSshKeyLabel">SSH Private Key (PEM / OpenSSH) <small id="bk-key-hint" class="muted"></small></span>
+                <textarea id="bk-remote-ssh-key" rows="3" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+              </label>
+            </div>
+            <label class="toggle-row small" id="bk-verify-tls-wrap" style="margin:6px 0;">
+              <input type="checkbox" id="bk-remote-verify-tls" />
+              <span data-i18n="bkVerifyTlsLabel">Strict TLS certificate / SSH host-key verification</span>
+            </label>
+            <div class="retention-grid" style="margin-top:8px;">
+              <label class="field">
+                <span data-i18n="bkMaxCountLabel">Max Backups (0 = ∞)</span>
+                <input id="bk-remote-max-count" type="number" min="0" max="10000" step="1" value="30" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkMaxSizeLabel">Max Total Size (MB, 0 = ∞)</span>
+                <input id="bk-remote-max-size" type="number" min="0" max="1048576" step="1" value="1024" />
+              </label>
+              <label class="field">
+                <span data-i18n="bkMaxAgeLabel">Max Age (Days, 0 = ∞)</span>
+                <input id="bk-remote-max-age" type="number" min="0" max="36500" step="1" value="90" />
+              </label>
+            </div>
+            <div class="row-actions" style="margin-top:10px;">
+              <button type="button" id="btn-bk-test-remote" class="btn btn-secondary small" data-i18n="btnBkTestRemote">🔌 Test Connection</button>
+              <button type="button" id="btn-bk-refresh-remote" class="btn btn-ghost small" data-i18n="btnBkListRemote">🔄 List Remote Files</button>
+              <button type="button" id="btn-bk-run-remote" class="btn btn-ghost small" data-i18n="btnBkUploadNow">☁️ Upload Now</button>
+            </div>
+            <p id="bk-remote-msg" class="small muted" style="margin:6px 0;"></p>
+            <div id="bk-remote-list" class="backup-file-list"></div>
+          </div>
+
+          <div class="settings-panel">
+            <h4 data-i18n="bkHistoryTitle">📜 Recent Backup Runs</h4>
+            <div id="bk-history-list" class="backup-history-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-close="settings-modal" data-i18n="btnDone">✅ Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: CHOOSE OVERVIEW CARDS & ANALYTICS GRAPHS -->
+  <dialog id="widgets-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="widgetsModalTitle">🎛️ Choose Dashboard Cards &amp; Graphs</h3>
+          <p class="modal-subtitle muted small" data-i18n="widgetsModalSub">Toggle which overview KPI cards and analytics charts appear on your dashboard.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="widgets-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="widgets-kpi-section" class="settings-panel" style="margin-bottom:14px;">
+          <h4 data-i18n="widgetsKpiHeading">Overview KPI Cards</h4>
+          <p class="muted small" data-i18n="widgetsKpiSub">Select key metrics for net worth, spending pace, top merchants, and recurring bills.</p>
+          <div id="widgets-kpi-list" class="widgets-picker-grid"></div>
+        </div>
+        <div id="widgets-chart-section" class="settings-panel">
+          <h4 data-i18n="widgetsChartHeading">Analytics Graphs</h4>
+          <p class="muted small" data-i18n="widgetsChartSub">Pick charts to visualize monthly trends, categories, top recipients, weekdays, and pocket distribution.</p>
+          <div id="widgets-chart-list" class="widgets-picker-grid"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-widgets-reset-default" class="btn btn-ghost" style="margin-right:auto;" data-i18n="btnResetDefault">🔄 Reset Default</button>
+        <button type="button" class="btn btn-primary" data-close="widgets-modal" data-i18n="btnDone">✅ Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="js/i18n.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/receipt.js"></script>
+  <script src="js/importer-ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

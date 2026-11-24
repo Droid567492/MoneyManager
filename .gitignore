@@ -1,0 +1,21 @@
+# Secrets and local environment configuration
+.env
+.env.local
+
+# Runtime SQLite database, WAL files, backups & uploaded receipts
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.csv
+data/*.json
+data/receipts/*
+!data/receipts/.gitkeep
+data/backups/*
+!data/backups/.gitkeep
+!data/.gitkeep
+
+# Dependencies & logs
+node_modules/
+*.log
+npm-debug.log*
+.DS_Store

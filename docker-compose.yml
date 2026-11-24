@@ -1,0 +1,19 @@
+services:
+  moneymanager:
+    image: ghcr.io/droid567492/moneymanager:latest
+    container_name: moneymanager
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - TZ=${TZ:-UTC}
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DB_PATH=/app/data/moneymanager.db
+      - RECEIPTS_DIR=/app/data/receipts
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-4-hydrogen}
+    volumes:
+      - ./data:/app/data

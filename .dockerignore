@@ -1,0 +1,12 @@
+.git
+.env
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/receipts/*
+data/backups/*
+data/*.csv
+data/*.json
+node_modules
+*.log
+.DS_Store

@@ -1,0 +1,31 @@
+{
+  "name": "moneymanager",
+  "version": "1.0.0",
+  "description": "Self-hosted personal finance PWA with multi-bank pockets, Gemini receipt scanning, Google Sheets import, scheduled backups, and deterministic running balance tracking.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/verify.test.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Droid567492/MoneyManager.git"
+  },
+  "homepage": "https://github.com/Droid567492/MoneyManager#readme",
+  "bugs": {
+    "url": "https://github.com/Droid567492/MoneyManager/issues"
+  },
+  "keywords": [
+    "personal-finance",
+    "budget",
+    "self-hosted",
+    "pwa",
+    "sqlite",
+    "docker",
+    "receipt-ocr"
+  ],
+  "license": "MIT"
+}
