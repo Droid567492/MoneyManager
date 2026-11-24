@@ -483,7 +483,9 @@ function normalizeImportedCategory(rawCategory, type, categories) {
   const findByName = (name) => categories.find((c) => c.name === name) || null;
 
   if (type === 'transfer') {
-    if (lower.includes('reimb') || lower.includes('vissza')) return findByName('Pocket Reimbursement');
+    if (lower.includes('reimb') || lower.includes('vissza')) {
+      return findByName('Pocket Reimbursement') || findByName('Internal Transfer');
+    }
     if (lower.includes('sav') || lower.includes('felre') || lower.includes('megtakar')) return findByName('Savings / Set Aside');
     if (lower.includes('bank')) return findByName('Bank-to-Bank Transfer');
     if (lower.includes('pocket') || lower.includes('zseb')) return findByName('Pocket-to-Pocket Transfer');
@@ -494,13 +496,13 @@ function normalizeImportedCategory(rawCategory, type, categories) {
     return findByName('Work / Salary');
   }
   if (lower.includes('scholar') || lower.includes('ösztöndíj') || lower.includes('osztondij')) {
-    return findByName('Scholarship');
+    return findByName('Scholarship') || findByName('Other Income');
   }
   if (lower.includes('family') || lower.includes('gift') || lower.includes('család') || lower.includes('csalad') || lower.includes('ajándék') || lower.includes('ajandek')) {
     return findByName('Family & Gifts');
   }
   if (lower.includes('tech') || lower.includes('gadget') || lower.includes('elektron') || lower.includes('pc') || lower.includes('laptop') || lower.includes('phone')) {
-    return findByName('Tech & Electronics');
+    return findByName('Tech & Electronics') || findByName('Shopping');
   }
   if (lower.includes('fuel') || lower.includes('gas') || lower.includes('benzin') || lower.includes('üzemanyag') || lower.includes('uzemanyag') || lower.includes('transport')) {
     return findByName('Fuel & Transport');
@@ -1155,6 +1157,7 @@ function restoreFullBackup(db, receiptsDir, rawBackup, { mode = 'replace' } = {}
   try {
     if (restoreMode === 'replace') {
       db.prepare('DELETE FROM transactions').run();
+      db.prepare('DELETE FROM deleted_transactions').run();
       db.prepare('DELETE FROM counterparties').run();
       db.prepare('DELETE FROM pockets').run();
       db.prepare('DELETE FROM accounts').run();

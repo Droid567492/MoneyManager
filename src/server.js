@@ -4,6 +4,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const { URL } = require('node:url');
 
 const { initDatabase, seedCounterpartiesFromTransactions, getSetting, setSetting, getFxRates } = require('./db');
@@ -33,6 +34,12 @@ const {
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  sanitizeTrashRetentionMinutes,
+  getTrashRetentionMinutes,
+  purgeExpiredDeletedTransactions,
+  listDeletedTransactions,
+  restoreDeletedTransactions,
+  permanentlyDeleteTrashItems,
   approveTransaction,
   approveAllTransactions,
   bulkManageTransactions,
@@ -343,16 +350,23 @@ function recordWebhookLog(db, req, body, outcome) {
     const previewParts = [body?.app, body?.title, body?.text || body?.bigText || body?.rawText]
       .map((s) => String(s || '').trim())
       .filter(Boolean);
+    const tx = outcome?.transaction;
+    let statusText = String(outcome?.reason || 'Ignored');
+    if (outcome?.logged && tx) {
+      if (tx.type === 'transfer' && tx.dest_pocket_name) {
+        statusText = `${tx.account_name} (${tx.pocket_name}) -> ${tx.dest_account_name || tx.account_name} (${tx.dest_pocket_name}) (${tx.amount} ${tx.currency})`;
+      } else {
+        statusText = `${tx.account_name} -> ${tx.pocket_name} (${tx.amount} ${tx.currency})`;
+      }
+    }
     const entry = {
       at: new Date().toISOString(),
       source: String(req.headers['user-agent'] || '').slice(0, 60),
       preview: previewParts.join(' | ').slice(0, 180) || '(empty body)',
       logged: Boolean(outcome?.logged),
-      statusText: outcome?.logged && outcome?.transaction
-        ? `${outcome.transaction.account_name} -> ${outcome.transaction.pocket_name} (${outcome.transaction.amount} ${outcome.transaction.currency})`
-        : String(outcome?.reason || 'Ignored'),
+      statusText,
     };
-    setSetting(db, 'notification_webhook_logs', JSON.stringify([entry, ...logs].slice(0, 15)));
+    setSetting(db, 'notification_webhook_logs', JSON.stringify([entry, ...logs].slice(0, 50)));
   } catch {
     // ignore logging failure
   }
@@ -366,8 +380,67 @@ function extensionFromMime(mime) {
   return '.jpg';
 }
 
+function resolveBuildInfo(rootDir) {
+  let pkgVersion = '0.0.0';
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+    if (pkg && pkg.version) pkgVersion = String(pkg.version);
+  } catch {
+    // keep fallback version
+  }
+
+  const version = (process.env.APP_VERSION || pkgVersion).replace(/^v/i, '').trim() || '0.0.0';
+  let buildNumber = String(process.env.APP_BUILD_NUMBER || '').trim();
+  let commitSha = String(process.env.APP_COMMIT_SHA || '').trim().slice(0, 7);
+  const buildTime = String(process.env.APP_BUILD_TIME || '').trim();
+  let isDirty = false;
+
+  if (!commitSha || !buildNumber) {
+    const runGit = (args) =>
+      execFileSync('git', args, {
+        cwd: rootDir,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 1500,
+      }).trim();
+    try {
+      if (!commitSha) commitSha = runGit(['rev-parse', '--short=7', 'HEAD']).slice(0, 7);
+    } catch {
+      // git unavailable (e.g. Docker container without .git)
+    }
+    try {
+      if (!buildNumber) buildNumber = runGit(['rev-list', '--count', 'HEAD']);
+    } catch {
+      // git count unavailable
+    }
+    try {
+      if (runGit(['status', '--porcelain'])) isDirty = true;
+    } catch {
+      // ignore
+    }
+  }
+
+  let label = `v${version}`;
+  if (buildNumber) label += ` · build #${buildNumber}`;
+  if (commitSha) {
+    label += ` (${isDirty ? `${commitSha}-dev` : commitSha})`;
+  } else if (isDirty) {
+    label += ' (dev)';
+  }
+
+  return {
+    version,
+    buildNumber,
+    commitSha,
+    isDirty,
+    buildTime,
+    label,
+  };
+}
+
 function createApp(options = {}) {
   const rootDir = options.rootDir || path.resolve(__dirname, '..');
+  const appBuildInfo = resolveBuildInfo(rootDir);
   const dataDir = options.dataDir || path.join(rootDir, 'data');
   const dbPath = options.dbPath || process.env.DB_PATH || path.join(dataDir, 'moneymanager.db');
   const receiptsDir = options.receiptsDir || process.env.RECEIPTS_DIR || path.join(dataDir, 'receipts');
@@ -383,6 +456,7 @@ function createApp(options = {}) {
 
   const db = initDatabase(dbPath);
   seedCounterpartiesFromTransactions(db);
+  purgeExpiredDeletedTransactions(db, receiptsDir);
   recalculateAllBalances(db);
 
   const backupCtx = { dataDir, receiptsDir, defaultBackupsDir: backupsDir };
@@ -477,6 +551,7 @@ function createApp(options = {}) {
           user: sessionUser ? { id: sessionUser.id, username: sessionUser.username } : null,
           sessionTimeoutMinutes: getSessionTimeoutMinutes(db),
           expiresAt: sessionUser ? sessionUser.expiresAt : null,
+          appVersion: appBuildInfo,
         });
       }
 
@@ -673,6 +748,7 @@ function createApp(options = {}) {
           selectedIds: parsedUrl.searchParams.get('selectedIds') || '',
           limit: parsedUrl.searchParams.get('limit') || '300',
           page: parsedUrl.searchParams.get('page') || '1',
+          receiptsDir,
         };
         const data = getDashboardData(db, filters);
         return sendJson(res, 200, data);
@@ -701,6 +777,39 @@ function createApp(options = {}) {
         return sendJson(res, 200, result);
       }
 
+      if (pathname === '/api/transactions/trash' && method === 'GET') {
+        return sendJson(res, 200, listDeletedTransactions(db, receiptsDir));
+      }
+
+      if (pathname === '/api/transactions/trash/restore' && method === 'POST') {
+        const body = await readRequestBody(req, 256 * 1024);
+        const result = restoreDeletedTransactions(db, {
+          ids: body.ids,
+          all: Boolean(body.all),
+          receiptsDir,
+        });
+        return sendJson(res, 200, result);
+      }
+
+      if (pathname === '/api/transactions/trash' && method === 'DELETE') {
+        const body = await readRequestBody(req, 256 * 1024);
+        const result = permanentlyDeleteTrashItems(db, {
+          ids: body.ids,
+          all: Boolean(body.all) || parsedUrl.searchParams.get('all') === '1',
+          receiptsDir,
+        });
+        return sendJson(res, 200, result);
+      }
+
+      const trashItemMatch = /^\/api\/transactions\/trash\/(\d+)$/.exec(pathname);
+      if (trashItemMatch && method === 'DELETE') {
+        const result = permanentlyDeleteTrashItems(db, {
+          ids: [Number(trashItemMatch[1])],
+          receiptsDir,
+        });
+        return sendJson(res, 200, result);
+      }
+
       const approveTxMatch = /^\/api\/transactions\/(\d+)\/approve$/.exec(pathname);
       if (approveTxMatch && method === 'POST') {
         const tx = approveTransaction(db, Number(approveTxMatch[1]));
@@ -716,18 +825,8 @@ function createApp(options = {}) {
           return sendJson(res, 200, { transaction: tx });
         }
         if (method === 'DELETE') {
-          const row = db.prepare('SELECT receipt_path FROM transactions WHERE id = ?').get(txId);
-          deleteTransaction(db, txId);
-          if (row && row.receipt_path) {
-            const stillUsed = db
-              .prepare('SELECT COUNT(*) AS cnt FROM transactions WHERE receipt_path = ?')
-              .get(row.receipt_path).cnt;
-            if (stillUsed === 0) {
-              const safePath = path.join(receiptsDir, path.basename(row.receipt_path));
-              if (fs.existsSync(safePath)) fs.unlinkSync(safePath);
-            }
-          }
-          return sendJson(res, 200, { ok: true });
+          const result = deleteTransaction(db, txId, { receiptsDir });
+          return sendJson(res, 200, { ok: true, ...result });
         }
       }
 
@@ -1245,7 +1344,9 @@ function createApp(options = {}) {
           webhookToken,
           webhookLogs: getWebhookLogs(db),
           sessionTimeoutMinutes: getSessionTimeoutMinutes(db),
+          trashRetentionMinutes: getTrashRetentionMinutes(db),
           pushSubscriptionCount: countPushSubscriptions(db),
+          appVersion: appBuildInfo,
         });
       }
 
@@ -1312,7 +1413,18 @@ function createApp(options = {}) {
           setSetting(db, 'session_timeout_minutes', String(mins));
           updateActiveSessionsTimeout(db, mins);
         }
-        return sendJson(res, 200, { ok: true, sessionTimeoutMinutes: getSessionTimeoutMinutes(db) });
+        if (body.trashRetentionMinutes !== undefined) {
+          const trashMins = sanitizeTrashRetentionMinutes(body.trashRetentionMinutes);
+          setSetting(db, 'trash_retention_minutes', String(trashMins));
+          if (trashMins === 0) {
+            permanentlyDeleteTrashItems(db, { all: true, receiptsDir });
+          }
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          sessionTimeoutMinutes: getSessionTimeoutMinutes(db),
+          trashRetentionMinutes: getTrashRetentionMinutes(db),
+        });
       }
 
       if (pathname === '/api/dashboard-layout' && method === 'PUT') {

@@ -4,9 +4,7 @@ const { getLocalIsoDate, buildReceiptAutoNote } = require('./ledger');
 
 const ALLOWED_EXPENSE_CATEGORIES = [
   'Shopping',
-  'Tech & Electronics',
   'Fuel & Transport',
-  'University & Dorm',
   'Food & Dining',
   'Bills & Subscriptions',
   'Entertainment',
@@ -16,7 +14,6 @@ const ALLOWED_EXPENSE_CATEGORIES = [
 
 const ALLOWED_INCOME_CATEGORIES = [
   'Work / Salary',
-  'Scholarship',
   'Family & Gifts',
   'Other Income',
 ];
@@ -25,7 +22,6 @@ const ALLOWED_TRANSFER_CATEGORIES = [
   'Bank-to-Bank Transfer',
   'Pocket-to-Pocket Transfer',
   'Savings / Set Aside',
-  'Pocket Reimbursement',
   'Internal Transfer',
 ];
 
@@ -36,13 +32,10 @@ function mapCategoryName(raw, txType = 'expense') {
   if (type === 'income') {
     const exactIn = ALLOWED_INCOME_CATEGORIES.find((c) => c.toLowerCase() === lower);
     if (exactIn) return exactIn;
-    if (lower.includes('salary') || lower.includes('work') || lower.includes('wage') || lower.includes('fizu') || lower.includes('bér')) {
+    if (/(?:salary|wage|munkabér)|\b(?:work|fizu|fizetés|bér)\b/i.test(lower)) {
       return 'Work / Salary';
     }
-    if (lower.includes('scholar') || lower.includes('ösztöndíj') || lower.includes('uni')) {
-      return 'Scholarship';
-    }
-    if (lower.includes('family') || lower.includes('gift') || lower.includes('apa') || lower.includes('anya') || lower.includes('család') || lower.includes('ajándék')) {
+    if (/(?:family|gift|család|ajándék)|\b(?:apa|anya|mama|mami)\b/i.test(lower)) {
       return 'Family & Gifts';
     }
     return 'Other Income';
@@ -53,9 +46,6 @@ function mapCategoryName(raw, txType = 'expense') {
     if (exactTr) return exactTr;
     if (lower.includes('saving') || lower.includes('set aside') || lower.includes('persely') || lower.includes('vault') || lower.includes('megtakarítás')) {
       return 'Savings / Set Aside';
-    }
-    if (lower.includes('reimburs') || lower.includes('vissza')) {
-      return 'Pocket Reimbursement';
     }
     if (lower.includes('pocket') || lower.includes('zseb')) {
       return 'Pocket-to-Pocket Transfer';
@@ -69,19 +59,13 @@ function mapCategoryName(raw, txType = 'expense') {
   if (!lower) return 'Shopping';
   const exact = ALLOWED_EXPENSE_CATEGORIES.find((c) => c.toLowerCase() === lower);
   if (exact) return exact;
-  if (lower.includes('tech') || lower.includes('electr') || lower.includes('gadget') || lower.includes('pc')) {
-    return 'Tech & Electronics';
-  }
-  if (lower.includes('fuel') || lower.includes('gas') || lower.includes('petrol') || lower.includes('transport') || lower.includes('mol') || lower.includes('omv') || lower.includes('shell')) {
+  if (/(?:fuel|petrol|transport|mobiljegy)|\b(?:gas|mol|omv|shell|orlen|bkk|máv|volán(?:busz)?)\b/i.test(lower)) {
     return 'Fuel & Transport';
-  }
-  if (lower.includes('uni') || lower.includes('dorm') || lower.includes('egyetem') || lower.includes('kollégium')) {
-    return 'University & Dorm';
   }
   if (lower.includes('food') || lower.includes('dining') || lower.includes('restaur') || lower.includes('cafe') || lower.includes('coffee') || lower.includes('wolt') || lower.includes('foodora')) {
     return 'Food & Dining';
   }
-  if (lower.includes('bill') || lower.includes('util') || lower.includes('subscr') || lower.includes('tele')) {
+  if (/(?:bill|util|subscr|telecom|telekom|yettel|vodafone|digi)/i.test(lower)) {
     return 'Bills & Subscriptions';
   }
   if (lower.includes('entertain') || lower.includes('cinema') || lower.includes('game')) {
@@ -90,7 +74,7 @@ function mapCategoryName(raw, txType = 'expense') {
   if (lower.includes('health') || lower.includes('pharm') || lower.includes('gym') || lower.includes('patika')) {
     return 'Health & Fitness';
   }
-  if (lower.includes('shop') || lower.includes('grocer') || lower.includes('supermarket') || lower.includes('store')) {
+  if (lower.includes('shop') || lower.includes('grocer') || lower.includes('supermarket') || lower.includes('store') || /(?:tech|electr|gadget)|\bpc\b/i.test(lower)) {
     return 'Shopping';
   }
   return 'Other Expense';
@@ -193,14 +177,14 @@ function buildDemoReceiptResult(filenameHint = '') {
         parsed: {
           source_type: 'bank_screenshot',
           tx_type: 'income',
-          merchant: 'Acme Corp.',
+          merchant: 'Mock Employer Corp.',
           date: today,
           time: '09:14',
           amount: 345000,
           currency: 'HUF',
           category: 'Work / Salary',
           items: [{ name: 'Reference: Monthly salary transfer', qty: 1, price: 345000 }],
-          auto_note: `Incoming transfer on ${bankHint} from Acme Corp. (Monthly salary transfer)`,
+          auto_note: `Incoming transfer on ${bankHint} from Mock Employer Corp. (Monthly salary transfer)`,
           card_last4: null,
           bank_hint: bankHint,
           pocket_hint: bankHint === 'Revolut' ? 'Main' : 'fo számla',
@@ -217,15 +201,15 @@ function buildDemoReceiptResult(filenameHint = '') {
       parsed: {
         source_type: 'bank_screenshot',
         tx_type: 'expense',
-        merchant: 'Wolt Magyarország',
+        merchant: 'Mock Food Delivery',
         date: today,
         time: '18:45',
         amount: 6890,
         currency: 'HUF',
         category: 'Food & Dining',
-        items: [{ name: 'Card purchase (•••• 4821)', qty: 1, price: 6890 }],
-        auto_note: `${bankHint} card payment at Wolt Magyarország`,
-        card_last4: '4821',
+        items: [{ name: 'Card purchase (•••• 0000)', qty: 1, price: 6890 }],
+        auto_note: `${bankHint} card payment at Mock Food Delivery`,
+        card_last4: '0000',
         bank_hint: bankHint,
         pocket_hint: bankHint === 'Revolut' ? 'Main' : 'fo számla',
         dest_bank_hint: null,
@@ -237,14 +221,14 @@ function buildDemoReceiptResult(filenameHint = '') {
 
   if (lower.includes('mol') || lower.includes('omv') || lower.includes('shell') || lower.includes('fuel')) {
     const items = [{ name: 'EVO 95 Petrol (28.5 L)', qty: 1, price: 18500 }];
-    const storeAddress = '789 Station Rd, Sample City';
+    const storeAddress = '789 Mock Station Rd, Mock City';
     return {
       mode: 'demo',
       warning: 'No Gemini API key configured yet, showing sample parsed receipt. Add your free Gemini API key in Settings for real photo OCR.',
       parsed: {
         source_type: 'receipt',
         tx_type: 'expense',
-        merchant: 'MOL Service Station',
+        merchant: 'Mock Fuel Station',
         store_address: storeAddress,
         date: today,
         time: null,
@@ -252,7 +236,7 @@ function buildDemoReceiptResult(filenameHint = '') {
         currency: 'HUF',
         category: 'Fuel & Transport',
         items,
-        auto_note: buildReceiptItemsNote('Fuel & Transport', 'MOL Service Station', items, {
+        auto_note: buildReceiptItemsNote('Fuel & Transport', 'Mock Fuel Station', items, {
           storeAddress,
           currency: 'HUF',
         }),
@@ -271,22 +255,22 @@ function buildDemoReceiptResult(filenameHint = '') {
       { name: 'USB-C 65W GaN Charger', qty: 1, price: 16990 },
       { name: 'Braided USB-C Cable 2m', qty: 1, price: 8000 },
     ];
-    const storeAddress = '456 Market Ave, Sample City';
+    const storeAddress = '456 Mock Market Ave, Mock City';
     return {
       mode: 'demo',
       warning: 'No Gemini API key configured yet, showing sample parsed receipt. Add your free Gemini API key in Settings for real photo OCR.',
       parsed: {
         source_type: 'receipt',
         tx_type: 'expense',
-        merchant: 'Alza / MediaMarkt',
+        merchant: 'Mock Electronics Store',
         store_address: storeAddress,
         date: today,
         time: null,
         amount: 24990,
         currency: 'HUF',
-        category: 'Tech & Electronics',
+        category: 'Shopping',
         items,
-        auto_note: buildReceiptItemsNote('Tech & Electronics', 'Alza / MediaMarkt', items, {
+        auto_note: buildReceiptItemsNote('Shopping', 'Mock Electronics Store', items, {
           storeAddress,
           currency: 'HUF',
         }),
@@ -300,29 +284,29 @@ function buildDemoReceiptResult(filenameHint = '') {
     };
   }
 
-  const sparItems = [
+  const mockGroceryItems = [
     { name: 'Milk & Dairy', qty: 2, price: 1450 },
     { name: 'Fresh Bakery Bread', qty: 1, price: 890 },
     { name: 'Chicken Breast', qty: 1, price: 3200 },
     { name: 'Coffee & Snacks', qty: 1, price: 2910 },
   ];
-  const sparAddress = '123 Main Street, Sample City';
+  const mockGroceryAddress = '123 Mock Street, Mock City';
   return {
     mode: 'demo',
     warning: 'No Gemini API key configured yet, showing sample parsed receipt. Add your free Gemini API key in Settings for real photo OCR.',
     parsed: {
       source_type: 'receipt',
       tx_type: 'expense',
-      merchant: 'SPAR Magyarország',
-      store_address: sparAddress,
+      merchant: 'Mock Grocery Store',
+      store_address: mockGroceryAddress,
       date: today,
       time: null,
       amount: 8450,
       currency: 'HUF',
       category: 'Shopping',
-      items: sparItems,
-      auto_note: buildReceiptItemsNote('Shopping', 'SPAR Magyarország', sparItems, {
-        storeAddress: sparAddress,
+      items: mockGroceryItems,
+      auto_note: buildReceiptItemsNote('Shopping', 'Mock Grocery Store', mockGroceryItems, {
+        storeAddress: mockGroceryAddress,
         currency: 'HUF',
       }),
       card_last4: null,
@@ -593,17 +577,17 @@ Analyze this image and extract exact transaction fields as JSON:
 - source_type: "receipt" or "bank_screenshot"
 - tx_type: "expense" (outgoing payment / purchase / negative amount / "Terhelés" / "Sent"), "income" (incoming deposit / credit / positive "+" / "Jóváírás" / "Received" / salary), or "transfer" (internal transfer between own banks/pockets/vaults / "Átvezetés" / "To Vault" / "Persely")
 - merchant: Store/merchant name, OR sender/recipient/partner name on a banking screenshot
-- store_address: Full street address / store location shown on the paper receipt (e.g. "123 Main Street, Sample City"), or null if not visible
+- store_address: Full street address / store location shown on the paper receipt (e.g. "123 Mock Street, Mock City"), or null if not visible
 - date: YYYY-MM-DD (or null if unreadable)
 - time: HH:MM in 24-hour format if visible on the receipt or screenshot, else null
 - amount: Positive number representing the absolute transaction total (in Hungarian numbers, spaces/dots are thousand separators and commas are decimals, e.g. "-12 450 Ft" -> 12450)
 - currency: "HUF", "EUR", "USD", or "GBP"
 - category:
-  - If tx_type="expense": one of Shopping, Tech & Electronics, Fuel & Transport, University & Dorm, Food & Dining, Bills & Subscriptions, Entertainment, Health & Fitness, Other Expense
-  - If tx_type="income": one of Work / Salary, Scholarship, Family & Gifts, Other Income
-  - If tx_type="transfer": one of Bank-to-Bank Transfer, Pocket-to-Pocket Transfer, Savings / Set Aside, Pocket Reimbursement, Internal Transfer
+  - If tx_type="expense": one of Shopping, Fuel & Transport, Food & Dining, Bills & Subscriptions, Entertainment, Health & Fitness, Other Expense
+  - If tx_type="income": one of Work / Salary, Family & Gifts, Other Income
+  - If tx_type="transfer": one of Bank-to-Bank Transfer, Pocket-to-Pocket Transfer, Savings / Set Aside, Internal Transfer
 - items: Array of { name, qty, price }. For receipts extract EVERY purchased line item (groceries, goods, etc.); for banking screenshots list key metadata lines such as payment reference ("Közlemény"), fee, or counterparty account if useful
-- auto_note: For receipts with items, list all bought items cleanly after the store name (e.g. "Shopping at Spar: Milk, Bread x2, Apples, Coffee"); for banking screenshots include any payment reference ("Közlemény") if visible
+- auto_note: For receipts with items, list all bought items cleanly after the store name (e.g. "Shopping at Mock Grocery: Milk, Bread x2, Apples, Coffee"); for banking screenshots include any payment reference ("Közlemény") if visible
 - card_last4: Last 4 digits of bank card if visible, else null
 - bank_hint: Detected bank or financial institution name shown on the screenshot (e.g. from app header or card brand), else null
 - pocket_hint: Source pocket/vault/sub-account name if visible (e.g. "fo számla", "persely számla", "Main", "Euro Vault", "Savings Pocket"), else null

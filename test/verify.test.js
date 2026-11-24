@@ -133,6 +133,8 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(st1.status, 200);
     assert.equal(st1.data.initialized, false);
     assert.equal(st1.data.authenticated, false);
+    assert.ok(st1.data.appVersion && st1.data.appVersion.version);
+    assert.match(st1.data.appVersion.label, /^v\d+\.\d+\.\d+/);
 
     // Unauthenticated dashboard must return 401
     const unauth = await reqJson('/api/dashboard');
@@ -181,7 +183,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
   let otpMainId;
   let revolutEurId;
   let shoppingCatId;
-  let scholarshipCatId;
+  let salaryCatId;
 
   await t.test('Seeded starter bank (Main Bank), pockets, and categories exist without personal data', async () => {
     const dash = await reqJson('/api/dashboard');
@@ -192,6 +194,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       dash.data.accounts[0].pockets.map((p) => p.name),
       ['Main', 'Savings']
     );
+    assert.equal(dash.data.transactions.length, 0);
     assert.equal(dash.data.counterparties.in.length, 0);
     assert.equal(dash.data.counterparties.out.length, 0);
 
@@ -236,25 +239,35 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.ok(otpMainId);
     assert.ok(revolutEurId);
 
-    const catNames = dashWithBanks.data.categories.map((c) => c.name);
-    assert.ok(catNames.includes('Work / Salary'));
-    assert.ok(catNames.includes('Scholarship'));
-    assert.ok(catNames.includes('Family & Gifts'));
-    assert.ok(catNames.includes('Shopping'));
-    assert.ok(catNames.includes('Tech & Electronics'));
-    assert.ok(catNames.includes('Fuel & Transport'));
-    assert.ok(catNames.includes('Bank-to-Bank Transfer'));
-    assert.ok(catNames.includes('Pocket-to-Pocket Transfer'));
-    assert.ok(catNames.includes('Savings / Set Aside'));
-    assert.ok(catNames.includes('Pocket Reimbursement'));
+    const catNames = dashWithBanks.data.categories.map((c) => c.name).sort();
+    assert.deepEqual(catNames, [
+      'Bank-to-Bank Transfer',
+      'Bills & Subscriptions',
+      'Entertainment',
+      'Family & Gifts',
+      'Food & Dining',
+      'Fuel & Transport',
+      'Health & Fitness',
+      'Internal Transfer',
+      'Other Expense',
+      'Other Income',
+      'Pocket-to-Pocket Transfer',
+      'Savings / Set Aside',
+      'Shopping',
+      'Work / Salary',
+    ]);
+    assert.equal(catNames.includes('Scholarship'), false);
+    assert.equal(catNames.includes('University & Dorm'), false);
+    assert.equal(catNames.includes('Tech & Electronics'), false);
+    assert.equal(catNames.includes('Pocket Reimbursement'), false);
 
     shoppingCatId = dashWithBanks.data.categories.find((c) => c.name === 'Shopping').id;
-    scholarshipCatId = dashWithBanks.data.categories.find((c) => c.name === 'Scholarship').id;
+    salaryCatId = dashWithBanks.data.categories.find((c) => c.name === 'Work / Salary').id;
   });
 
   // 3. Running Balance After & Auto-Note vs Manual Note & Transfers & Backdating
   await t.test('Transactions, auto-notes, manual notes, cross-FX transfer & backdated recalculation', async () => {
-    // Income: Scholarship +120,000 HUF into OTP Main
+    // Income: Work / Salary +120,000 HUF into OTP Main
     const tx1 = await reqJson('/api/transactions', {
       method: 'POST',
       body: {
@@ -263,14 +276,14 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         amount: 120000,
         currency: 'HUF',
         pocketId: otpMainId,
-        categoryId: scholarshipCatId,
-        merchant: 'University',
+        categoryId: salaryCatId,
+        merchant: 'Mock Employer Org',
         note: '',
       },
     });
     assert.equal(tx1.status, 201);
     assert.equal(tx1.data.transaction.note_source, 'auto');
-    assert.match(tx1.data.transaction.note, /Scholarship/i);
+    assert.match(tx1.data.transaction.note, /Work \/ Salary|Mock Employer Org/i);
     assert.equal(tx1.data.transaction.pocket_balance_after, 120000);
     assert.equal(tx1.data.transaction.account_balance_after, 120000);
 
@@ -284,17 +297,17 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryId: shoppingCatId,
-        merchant: 'SPAR',
+        merchant: 'Mock Grocery',
         note: '',
       },
     });
     assert.equal(tx2.status, 201);
     assert.equal(tx2.data.transaction.note_source, 'auto');
-    assert.match(tx2.data.transaction.note, /SPAR/i);
+    assert.match(tx2.data.transaction.note, /Mock Grocery/i);
     assert.equal(tx2.data.transaction.pocket_balance_after, 105500);
     assert.equal(tx2.data.transaction.account_balance_after, 105500);
 
-    // Expense with MANUAL note in Tech -> Manual note preserved
+    // Expense with MANUAL note in Shopping -> Manual note preserved
     const tx3 = await reqJson('/api/transactions', {
       method: 'POST',
       body: {
@@ -303,8 +316,8 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         amount: 25500,
         currency: 'HUF',
         pocketId: otpMainId,
-        categoryName: 'Tech & Electronics',
-        merchant: 'Alza',
+        categoryName: 'Shopping',
+        merchant: 'Mock Electronics Shop',
         note: 'Mechanical keyboard switches',
       },
     });
@@ -343,7 +356,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Fuel & Transport',
-        merchant: 'MOL',
+        merchant: 'Mock Fuel Station',
         note: '',
       },
     });
@@ -488,7 +501,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: {
         imageBase64: `data:image/jpeg;base64,${dummyImgB64}`,
         mimeType: 'image/jpeg',
-        filename: 'spar-receipt.jpg',
+        filename: 'mock-grocery-receipt.jpg',
         pocketId: ersteMainId,
         autoLog: true,
       },
@@ -496,7 +509,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(scanRes.status, 200);
     assert.equal(scanRes.data.autoLogged, true);
     assert.ok(scanRes.data.receiptPath);
-    assert.equal(scanRes.data.transaction.merchant, 'SPAR');
+    assert.equal(scanRes.data.transaction.merchant, 'Mock Grocery');
     assert.ok(scanRes.data.transaction.note.includes('Milk & Dairy x2'));
     assert.ok(scanRes.data.transaction.note.includes('Fresh Bakery Bread'));
     assert.ok(scanRes.data.transaction.note.includes('Chicken Breast'));
@@ -515,6 +528,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     const settingsRes = await reqJson('/api/settings');
     assert.equal(settingsRes.status, 200);
     assert.ok(settingsRes.data.webhookToken && settingsRes.data.webhookToken.length >= 16);
+    assert.ok(settingsRes.data.appVersion && /^v\d+\.\d+\.\d+/.test(settingsRes.data.appVersion.label));
     assert.ok(settingsRes.data.geminiUsage);
     assert.equal(typeof settingsRes.data.geminiUsage.nearLimit, 'boolean');
     assert.ok(['ok', 'warning', 'rate_limited'].includes(settingsRes.data.geminiUsage.status));
@@ -537,11 +551,13 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     const htmlRes = await fetch(`${baseUrl}/`);
     const htmlText = await htmlRes.text();
     assert.ok(htmlText.includes('id="meta-theme-color" content="#0b1120"'));
+    assert.ok(htmlText.includes('id="auth-app-version"'));
+    assert.ok(htmlText.includes('id="settings-app-version"'));
   });
 
   // 6. Counterparties auto-save & delete + Account & Pocket CRUD
   await t.test('Counterparties prediction auto-save/delete and full Account & Pocket CRUD', async () => {
-    // Log new income with a brand new origin "Grandpa" and new expense with destination "Bistro 42"
+    // Log new income with a brand new origin "Mock Family Sender" and new expense with destination "Mock Bistro 42"
     const incRes = await reqJson('/api/transactions', {
       method: 'POST',
       body: {
@@ -551,8 +567,8 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Family & Gifts',
-        merchant: 'Grandpa',
-        note: 'Gift from Grandpa',
+        merchant: 'Mock Family Sender',
+        note: 'Gift from Mock Family Sender',
       },
     });
     assert.equal(incRes.status, 201);
@@ -566,7 +582,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Food & Dining',
-        merchant: 'Bistro 42',
+        merchant: 'Mock Bistro 42',
         note: '',
       },
     });
@@ -575,19 +591,19 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     // Both should now appear in counterparties predictions
     const cpList = await reqJson('/api/counterparties');
     assert.equal(cpList.status, 200);
-    const grandpa = cpList.data.counterparties.in.find((c) => c.name === 'Grandpa');
-    const bistro = cpList.data.counterparties.out.find((c) => c.name === 'Bistro 42');
-    assert.ok(grandpa);
+    const familySender = cpList.data.counterparties.in.find((c) => c.name === 'Mock Family Sender');
+    const bistro = cpList.data.counterparties.out.find((c) => c.name === 'Mock Bistro 42');
+    assert.ok(familySender);
     assert.ok(bistro);
 
-    // Delete "Bistro 42" from saved predictions -> transaction remains intact & editing its note does not re-add it
+    // Delete "Mock Bistro 42" from saved predictions -> transaction remains intact & editing its note does not re-add it
     const bistroTxId = expRes.data.transaction.id;
     const delCp = await reqJson(`/api/counterparties/${bistro.id}`, { method: 'DELETE' });
     assert.equal(delCp.status, 200);
-    assert.equal(delCp.data.counterparties.out.some((c) => c.name === 'Bistro 42'), false);
+    assert.equal(delCp.data.counterparties.out.some((c) => c.name === 'Mock Bistro 42'), false);
 
     const dashAfterDelCp = await reqJson('/api/dashboard');
-    assert.ok(dashAfterDelCp.data.transactions.some((tx) => tx.id === bistroTxId && tx.merchant === 'Bistro 42'));
+    assert.ok(dashAfterDelCp.data.transactions.some((tx) => tx.id === bistroTxId && tx.merchant === 'Mock Bistro 42'));
 
     const noteEditOnRemovedCp = await reqJson(`/api/transactions/${bistroTxId}`, {
       method: 'PATCH',
@@ -595,7 +611,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     });
     assert.equal(noteEditOnRemovedCp.status, 200);
     const cpAfterEdit = await reqJson('/api/counterparties');
-    assert.equal(cpAfterEdit.data.counterparties.out.some((c) => c.name === 'Bistro 42'), false);
+    assert.equal(cpAfterEdit.data.counterparties.out.some((c) => c.name === 'Mock Bistro 42'), false);
 
     // Create a custom bank "Wise", add a pocket, edit pocket, delete pocket, edit bank, delete bank
     const createBank = await reqJson('/api/accounts', {
@@ -638,7 +654,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'EUR',
         pocketId: backupPocketId,
         categoryName: 'Shopping',
-        merchant: 'Wise Test Shop',
+        merchant: 'Mock Wise Shop',
         note: 'Archived check',
       },
     });
@@ -754,7 +770,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Shopping',
-        merchant: 'HistOnlyShop',
+        merchant: 'Mock HistOnlyShop',
         note: 'historical only expense',
         isHistorical: true,
       },
@@ -770,7 +786,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Other Income',
-        merchant: 'HistOnlySource',
+        merchant: 'Mock HistOnlySource',
         note: 'historical only income',
         isHistorical: true,
       },
@@ -786,7 +802,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Shopping',
-        merchant: 'MixedHistLiveShop',
+        merchant: 'Mock MixedHistLiveShop',
         note: 'historical tx for mixed',
         isHistorical: true,
       },
@@ -802,7 +818,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpMainId,
         categoryName: 'Shopping',
-        merchant: 'MixedHistLiveShop',
+        merchant: 'Mock MixedHistLiveShop',
         note: 'live tx for mixed',
         isHistorical: false,
       },
@@ -813,9 +829,9 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(allDash.status, 200);
     const hasHist = allDash.data.transactions.some((tx) => tx.is_historical === 1);
     assert.ok(hasHist, 'Expected imported historical transactions in test DB');
-    assert.ok(allDash.data.counterparties.out.some((c) => c.name === 'HistOnlyShop'));
-    assert.ok(allDash.data.counterparties.in.some((c) => c.name === 'HistOnlySource'));
-    assert.ok(allDash.data.counterparties.out.some((c) => c.name === 'MixedHistLiveShop'));
+    assert.ok(allDash.data.counterparties.out.some((c) => c.name === 'Mock HistOnlyShop'));
+    assert.ok(allDash.data.counterparties.in.some((c) => c.name === 'Mock HistOnlySource'));
+    assert.ok(allDash.data.counterparties.out.some((c) => c.name === 'Mock MixedHistLiveShop'));
 
     const liveDash = await reqJson('/api/dashboard?historical=live&limit=500');
     assert.equal(liveDash.status, 200);
@@ -824,10 +840,10 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.ok(liveDash.data.charts.monthlyCashflow.length <= allDash.data.charts.monthlyCashflow.length);
     assert.equal(liveDash.data.totalNetWorthHuf, allDash.data.totalNetWorthHuf);
     assert.ok(liveDash.data.availableMonths.length <= allDash.data.availableMonths.length);
-    assert.equal(liveDash.data.counterparties.out.some((c) => c.name === 'HistOnlyShop'), false);
-    assert.equal(liveDash.data.counterparties.in.some((c) => c.name === 'HistOnlySource'), false);
-    assert.equal(liveDash.data.counterparties.out.some((c) => c.name === 'MixedHistLiveShop'), true);
-    assert.equal(liveDash.data.counterparties.in.some((c) => c.name === 'Grandpa'), true);
+    assert.equal(liveDash.data.counterparties.out.some((c) => c.name === 'Mock HistOnlyShop'), false);
+    assert.equal(liveDash.data.counterparties.in.some((c) => c.name === 'Mock HistOnlySource'), false);
+    assert.equal(liveDash.data.counterparties.out.some((c) => c.name === 'Mock MixedHistLiveShop'), true);
+    assert.equal(liveDash.data.counterparties.in.some((c) => c.name === 'Mock Family Sender'), true);
 
     // Reverse existing bank order and customize layout
     const origBankIds = allDash.data.accounts.map((a) => a.id);
@@ -870,9 +886,9 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
 
     const cpWithLayoutHide = await reqJson('/api/counterparties');
     assert.equal(cpWithLayoutHide.status, 200);
-    assert.equal(cpWithLayoutHide.data.counterparties.out.some((c) => c.name === 'HistOnlyShop'), false);
-    assert.equal(cpWithLayoutHide.data.counterparties.in.some((c) => c.name === 'HistOnlySource'), false);
-    assert.equal(cpWithLayoutHide.data.counterparties.out.some((c) => c.name === 'MixedHistLiveShop'), true);
+    assert.equal(cpWithLayoutHide.data.counterparties.out.some((c) => c.name === 'Mock HistOnlyShop'), false);
+    assert.equal(cpWithLayoutHide.data.counterparties.in.some((c) => c.name === 'Mock HistOnlySource'), false);
+    assert.equal(cpWithLayoutHide.data.counterparties.out.some((c) => c.name === 'Mock MixedHistLiveShop'), true);
     assert.deepEqual(saveRes.data.dashboardLayout.palette, layoutPayload.palette);
     // Legacy flat layout migrates automatically to 2D rows
     assert.ok(Array.isArray(saveRes.data.dashboardLayout.sectionRows));
@@ -1088,6 +1104,19 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.ok(i18nCode.includes('tCat'));
     assert.equal(/\b(Erste|OTP|Revolut)\b/i.test(i18nCode), false, 'i18n UI strings must not contain hardcoded bank names');
     assert.ok(i18nCode.includes('tranzakció') || i18nCode.includes('Tranzakciós napló'));
+    const sandboxWin = {};
+    const mockStorage = { getItem: () => null, setItem: () => {} };
+    new Function('window', 'localStorage', i18nCode)(sandboxWin, mockStorage);
+    assert.ok(sandboxWin.MoneyI18n && sandboxWin.MoneyI18n.STRINGS);
+    const { en: enDict, hu: huDict } = sandboxWin.MoneyI18n.STRINGS;
+    assert.equal(enDict.btnClose, 'Close');
+    assert.equal(huDict.btnClose, 'Bezárás');
+    const htmlI18nKeys = Array.from(html.matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g), (m) => m[1]);
+    assert.ok(htmlI18nKeys.length > 20);
+    for (const k of htmlI18nKeys) {
+      assert.ok(typeof enDict[k] === 'string' && enDict[k].length > 0, `Missing EN i18n key: ${k}`);
+      assert.ok(typeof huDict[k] === 'string' && huDict[k].length > 0, `Missing HU i18n key: ${k}`);
+    }
     assert.ok(html.includes('id="cp-edit-modal"'));
     assert.ok(html.includes('id="cp-edit-form"'));
     assert.ok(html.includes('id="cpm-update-prev"'));
@@ -1113,7 +1142,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId,
         categoryId: expCat1.id,
-        merchant: 'Old Coffee Stand',
+        merchant: 'Mock Coffee Stand',
         note: '',
       },
     });
@@ -1130,7 +1159,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId,
         categoryId: incCat1.id,
-        merchant: 'Legacy Client LLC',
+        merchant: 'Mock Client Legacy',
         note: '',
       },
     });
@@ -1139,8 +1168,8 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
 
     const cpRes = await reqJson('/api/counterparties');
     assert.equal(cpRes.status, 200);
-    const outCp = cpRes.data.counterparties.out.find((c) => c.name === 'Old Coffee Stand');
-    const inCp = cpRes.data.counterparties.in.find((c) => c.name === 'Legacy Client LLC');
+    const outCp = cpRes.data.counterparties.out.find((c) => c.name === 'Mock Coffee Stand');
+    const inCp = cpRes.data.counterparties.in.find((c) => c.name === 'Mock Client Legacy');
     assert.ok(outCp);
     assert.ok(inCp);
     assert.ok(Number(outCp.tx_count) >= 1);
@@ -1148,30 +1177,30 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
 
     const patchOutNoPrev = await reqJson(`/api/counterparties/${outCp.id}`, {
       method: 'PATCH',
-      body: { name: 'Roastery Beta', categoryId: expCat2.id, updatePrevious: false },
+      body: { name: 'Mock Roastery Beta', categoryId: expCat2.id, updatePrevious: false },
     });
     assert.equal(patchOutNoPrev.status, 200);
-    assert.equal(patchOutNoPrev.data.item.name, 'Roastery Beta');
+    assert.equal(patchOutNoPrev.data.item.name, 'Mock Roastery Beta');
     assert.equal(patchOutNoPrev.data.updatedTransactions, 0);
 
     const patchInWithPrev = await reqJson(`/api/counterparties/${inCp.id}`, {
       method: 'PATCH',
-      body: { name: 'Modern Client Group', categoryId: incCat2.id, updatePrevious: true },
+      body: { name: 'Mock Client Modern', categoryId: incCat2.id, updatePrevious: true },
     });
     assert.equal(patchInWithPrev.status, 200);
-    assert.equal(patchInWithPrev.data.item.name, 'Modern Client Group');
+    assert.equal(patchInWithPrev.data.item.name, 'Mock Client Modern');
     assert.ok(patchInWithPrev.data.updatedTransactions >= 1);
 
     const afterDash = await reqJson('/api/dashboard?limit=200');
     assert.equal(afterDash.status, 200);
     const untouchedTx = afterDash.data.transactions.find((x) => x.id === txOutId);
     const updatedTx = afterDash.data.transactions.find((x) => x.id === txInId);
-    assert.equal(untouchedTx.merchant, 'Old Coffee Stand');
+    assert.equal(untouchedTx.merchant, 'Mock Coffee Stand');
     assert.equal(untouchedTx.category_id, expCat1.id);
-    assert.equal(updatedTx.merchant, 'Modern Client Group');
+    assert.equal(updatedTx.merchant, 'Mock Client Modern');
     assert.equal(updatedTx.category_id, incCat2.id);
     assert.equal(updatedTx.category_name, incCat2.name);
-    assert.ok(updatedTx.note.includes('Modern Client Group'));
+    assert.ok(updatedTx.note.includes('Mock Client Modern'));
   });
 
   await t.test('Subpath /moneymanager/ routing, 301 redirect, and subpath-safe relative HTML assets', async () => {
@@ -1257,7 +1286,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     const normalized = normalizeGeminiPayload({
       source_type: 'bank_screenshot',
       tx_type: 'income',
-      merchant: 'Acme Corp.',
+      merchant: 'Mock Employer Corp.',
       date: '2026-11-15',
       time: '08:31:00',
       amount: '420000 Ft',
@@ -1354,7 +1383,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     const unauthRes = await fetch(`${baseUrl}/api/notifications/webhook?token=wrongtoken`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: 'OTP', text: 'Kártyás vásárlás: 1 000 Ft, Lidl' }),
+      body: JSON.stringify({ app: 'OTP', text: 'Kártyás vásárlás: 1 000 Ft, Mock Supermarket' }),
     });
     assert.equal(unauthRes.status, 401);
 
@@ -1392,7 +1421,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       },
       {
         app: 'Revolut',
-        title: 'Anna Maria Kovacs',
+        title: 'Mock Person Alpha Beta',
         text: 'Reacted ❤️ to your HUF1 payment',
       },
       {
@@ -1420,7 +1449,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: JSON.stringify({
         package: 'hu.otpbank.mobilbank',
         title: 'OTP MobilBank',
-        text: 'Kártyás vásárlás: 8 450 HUF, SPAR MAGYARORSZAG, Egyenleg: 245 100 HUF',
+        text: 'Kártyás vásárlás: 8 450 HUF, MOCK GROCERY MAGYARORSZAG, Egyenleg: 245 100 HUF',
       }),
     });
     assert.equal(otpNotifRes.status, 200);
@@ -1429,18 +1458,18 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(otpNotif.transaction.account_name, 'OTP');
     assert.equal(otpNotif.transaction.type, 'expense');
     assert.equal(otpNotif.transaction.amount, 8450);
-    assert.equal(otpNotif.transaction.merchant, 'SPAR');
+    assert.equal(otpNotif.transaction.merchant, 'Mock Grocery');
     assert.equal(otpNotif.transaction.needs_approval, 1);
     assert.equal(otpNotif.transaction.auto_source, 'notification');
 
-    // 4. Erste George incoming scholarship notification -> logged as income with needs_approval = 1
+    // 4. Erste George incoming salary notification -> logged as income with needs_approval = 1
     const ersteNotifRes = await fetch(`${baseUrl}/moneymanager/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         app: 'Erste George',
         title: 'Beérkező utalás',
-        text: 'Erste George: Beérkező utalás +120 000 HUF, Partner: Egyetem, Közlemény: Ösztöndíj',
+        text: 'Erste George: Beérkező utalás +120 000 HUF, Partner: Mock Employer Org, Közlemény: Munkabér',
       }),
     });
     assert.equal(ersteNotifRes.status, 200);
@@ -1450,7 +1479,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(ersteNotif.transaction.pocket_name, 'fo számla');
     assert.equal(ersteNotif.transaction.type, 'income');
     assert.equal(ersteNotif.transaction.amount, 120000);
-    assert.equal(ersteNotif.transaction.category_name, 'Scholarship');
+    assert.equal(ersteNotif.transaction.category_name, 'Work / Salary');
     assert.equal(ersteNotif.transaction.needs_approval, 1);
 
     // 5. Revolut transfer notification -> logged from Main -> Euro Vault with needs_approval = 1
@@ -1471,14 +1500,14 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(revNotif.transaction.dest_pocket_name, 'Euro Vault');
     assert.equal(revNotif.transaction.needs_approval, 1);
 
-    // 5b. Sender banking app priority: OTP notification mentioning "Revolut" and "Skoda" assigns to OTP's main pocket ("fo számla")
+    // 5b. Sender banking app priority: OTP notification mentioning "Revolut" and a non-bank suffix assigns to OTP's main pocket ("fo számla")
     const senderPriorityRes = await fetch(`${baseUrl}/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         package: 'hu.otpbank.mobilbank',
         title: 'OTP MobilBank',
-        text: 'Kártyás vásárlás: 12 300 HUF, Partner: Revolut Skoda szerviz',
+        text: 'Kártyás vásárlás: 12 300 HUF, Partner: Revolut Mock Auto Service',
         pocketId: ersteMainId,
       }),
     });
@@ -1492,7 +1521,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     const multilineMagicRes = await fetch(`${baseUrl}/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{"app":"OTP MobilBank","title":"Kártyás vásárlás","text":"4 500 HUF\nALDI Magyarország","bigText":""}',
+      body: '{"app":"OTP MobilBank","title":"Kártyás vásárlás","text":"4 500 HUF\nMock Discount Market","bigText":""}',
     });
     assert.equal(multilineMagicRes.status, 200);
     const multilineMagic = await multilineMagicRes.json();
@@ -1504,7 +1533,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     const pipeBodyRes = await fetch(`${baseUrl}/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: 'Erste George | Fizetés érkezett | +95 000 HUF, Partner: Studio Kft.',
+      body: 'Erste George | Fizetés érkezett | +95 000 HUF, Partner: Mock Studio Kft.',
     });
     assert.equal(pipeBodyRes.status, 200);
     const pipeBody = await pipeBodyRes.json();
@@ -1521,7 +1550,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: JSON.stringify({
         app: 'OTP Bank OTP Bank',
         title: 'Kártyás fizetés Kártyás fizetés',
-        text: '4 780,- Ft a(z) Lidl kereskedőnél',
+        text: '4 780,- Ft a(z) Mock Supermarket kereskedőnél',
         bigText: '{not_text_big}',
       }),
     });
@@ -1531,7 +1560,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(dualData.transaction.account_name, 'OTP');
     assert.equal(dualData.transaction.pocket_name, 'fo számla');
     assert.equal(dualData.transaction.amount, 4780);
-    assert.equal(dualData.transaction.merchant, 'Lidl');
+    assert.equal(dualData.transaction.merchant, 'Mock Supermarket');
 
     const unexpandedRes = await fetch(`${baseUrl}/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
       method: 'POST',
@@ -1554,7 +1583,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         app: 'Revolut',
-        title: 'Anna Maria Kovacs',
+        title: 'Mock Person Alpha Beta',
         text: 'Sent you HUF1. Tap to say thank you 💰',
       }),
     });
@@ -1564,7 +1593,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(revSentYou.transaction.type, 'income');
     assert.equal(revSentYou.transaction.account_name, 'Revolut');
     assert.equal(revSentYou.transaction.pocket_name, 'Main');
-    assert.equal(revSentYou.transaction.merchant, 'Anna Maria Kovacs');
+    assert.equal(revSentYou.transaction.merchant, 'Mock Person Alpha Beta');
     assert.equal(revSentYou.transaction.amount, 1);
     assert.equal(revSentYou.transaction.currency, 'HUF');
     assert.equal(revSentYou.transaction.needs_approval, 1);
@@ -1574,7 +1603,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         app: 'Revolut',
-        title: 'Netflix',
+        title: 'Mock Streaming Service',
         text: 'Paid HUF 4,500',
       }),
     });
@@ -1584,7 +1613,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(revOut.transaction.type, 'expense');
     assert.equal(revOut.transaction.account_name, 'Revolut');
     assert.equal(revOut.transaction.pocket_name, 'Main');
-    assert.equal(revOut.transaction.merchant, 'Netflix');
+    assert.equal(revOut.transaction.merchant, 'Mock Streaming Service');
     assert.equal(revOut.transaction.amount, 4500);
 
     const otpNegTransferRes = await fetch(`${baseUrl}/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
@@ -1593,7 +1622,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: JSON.stringify({
         app: 'OTP Bank',
         title: 'Azonnali átutalás',
-        text: '-25 000 Ft, Tanulmányi',
+        text: '-25 000 Ft, Mock External Recipient',
       }),
     });
     assert.equal(otpNegTransferRes.status, 200);
@@ -1602,7 +1631,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(otpNegTransfer.transaction.type, 'expense');
     assert.equal(otpNegTransfer.transaction.account_name, 'OTP');
     assert.equal(otpNegTransfer.transaction.pocket_name, 'fo számla');
-    assert.equal(otpNegTransfer.transaction.merchant, 'Tanulmányi');
+    assert.equal(otpNegTransfer.transaction.merchant, 'Mock External Recipient');
     assert.equal(otpNegTransfer.transaction.amount, 25000);
 
     const otpPosTransferRes = await fetch(`${baseUrl}/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
@@ -1611,7 +1640,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: JSON.stringify({
         app: 'OTP Bank',
         title: 'Azonnali átutalás',
-        text: '+18 500 Ft, Kovács Péter, Közlemény: vacsora',
+        text: '+18 500 Ft, Mock Sender Two, Közlemény: vacsora',
       }),
     });
     assert.equal(otpPosTransferRes.status, 200);
@@ -1620,7 +1649,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(otpPosTransfer.transaction.type, 'income');
     assert.equal(otpPosTransfer.transaction.account_name, 'OTP');
     assert.equal(otpPosTransfer.transaction.pocket_name, 'fo számla');
-    assert.equal(otpPosTransfer.transaction.merchant, 'Kovács Péter');
+    assert.equal(otpPosTransfer.transaction.merchant, 'Mock Sender Two');
     assert.equal(otpPosTransfer.transaction.amount, 18500);
 
     // 6. Filter dashboard by approval=needs_approval & approval=approved
@@ -1669,7 +1698,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpPocket.id,
         categoryName: 'Shopping',
-        merchant: 'SPAR Magyarország',
+        merchant: 'Mock Grocery Store',
         note: '',
       },
     });
@@ -1685,7 +1714,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: {
         imageBase64: `data:image/jpeg;base64,${dummyImgB64}`,
         mimeType: 'image/jpeg',
-        filename: 'spar-receipt.jpg',
+        filename: 'mock-grocery-receipt.jpg',
         pocketId: otpPocket.id,
         autoLog: true,
         attachToTxId: txId,
@@ -1695,11 +1724,11 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(attachRes.data.attachedToExisting, true);
     assert.equal(attachRes.data.transaction.id, txId);
     assert.ok(attachRes.data.transaction.receipt_path);
-    assert.equal(attachRes.data.transaction.store_address, '123 Main Street, Sample City');
+    assert.equal(attachRes.data.transaction.store_address, '123 Mock Street, Mock City');
     assert.equal(attachRes.data.transaction.note_source, 'auto');
     assert.ok(attachRes.data.transaction.note.includes('Milk & Dairy x2 (1,450 HUF)'));
     assert.ok(attachRes.data.transaction.note.includes('Coffee & Snacks (2,910 HUF)'));
-    assert.ok(attachRes.data.transaction.note.includes('Address: 123 Main Street, Sample City'));
+    assert.ok(attachRes.data.transaction.note.includes('Address: 123 Mock Street, Mock City'));
 
     // 3. Edit note manually (as #note-modal saves), then regenerate auto-note from items + address
     const manualPatch = await reqJson(`/api/transactions/${txId}`, {
@@ -1716,7 +1745,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: {
         imageBase64: `data:image/jpeg;base64,${dummyImgB64}`,
         mimeType: 'image/jpeg',
-        filename: 'spar-receipt.jpg',
+        filename: 'mock-grocery-receipt.jpg',
         pocketId: otpPocket.id,
         autoLog: true,
         attachToTxId: txId,
@@ -1732,7 +1761,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: {
         imageBase64: `data:image/jpeg;base64,${dummyImgB64}`,
         mimeType: 'image/jpeg',
-        filename: 'spar-receipt.jpg',
+        filename: 'mock-grocery-receipt.jpg',
         pocketId: otpPocket.id,
         autoLog: true,
         expandNote: true,
@@ -1743,7 +1772,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(attachExpandManual.data.transaction.note_source, 'manual');
     assert.ok(attachExpandManual.data.transaction.note.startsWith('Weekly groceries | '));
     assert.ok(attachExpandManual.data.transaction.note.includes('Milk & Dairy x2 (1,450 HUF)'));
-    assert.ok(attachExpandManual.data.transaction.note.includes('Address: 123 Main Street, Sample City'));
+    assert.ok(attachExpandManual.data.transaction.note.includes('Address: 123 Mock Street, Mock City'));
 
     const regenPatch = await reqJson(`/api/transactions/${txId}`, {
       method: 'PATCH',
@@ -1754,7 +1783,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.ok(regenPatch.data.transaction.note.includes('Milk & Dairy x2 (1,450 HUF)'));
     assert.ok(regenPatch.data.transaction.note.includes('Fresh Bakery Bread (890 HUF)'));
     assert.ok(regenPatch.data.transaction.note.includes('Coffee & Snacks (2,910 HUF)'));
-    assert.ok(regenPatch.data.transaction.note.includes('Address: 123 Main Street, Sample City'));
+    assert.ok(regenPatch.data.transaction.note.includes('Address: 123 Mock Street, Mock City'));
 
     // 4. Attach image with skipScan: true on a manual tx -> attaches image without overwriting manual note/fields
     const manualOnlyTx = await reqJson('/api/transactions', {
@@ -1766,7 +1795,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpPocket.id,
         categoryName: 'Food & Dining',
-        merchant: 'Local Bakery',
+        merchant: 'Mock Bakery',
         note: 'Cash pastry receipt',
         noteSource: 'manual',
       },
@@ -1779,7 +1808,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       body: {
         imageBase64: `data:image/jpeg;base64,${dummyImgB64}`,
         mimeType: 'image/jpeg',
-        filename: 'bakery.jpg',
+        filename: 'mock-bakery.jpg',
         skipScan: true,
         attachToTxId: manualTxId,
       },
@@ -1788,7 +1817,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
     assert.equal(skipScanRes.data.skippedScan, true);
     assert.equal(skipScanRes.data.attachedToExisting, true);
     assert.ok(skipScanRes.data.transaction.receipt_path);
-    assert.equal(skipScanRes.data.transaction.merchant, 'Local Bakery');
+    assert.equal(skipScanRes.data.transaction.merchant, 'Mock Bakery');
     assert.equal(skipScanRes.data.transaction.amount, 3333);
     assert.equal(skipScanRes.data.transaction.note, 'Cash pastry receipt');
     assert.equal(skipScanRes.data.transaction.note_source, 'manual');
@@ -1815,7 +1844,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpPocketBefore.id,
         categoryName: 'Other Expense',
-        merchant: 'Temporary Deposit Hold',
+        merchant: 'Mock Deposit Hold',
         note: 'Refundable hold',
         excludeFromAnalytics: true,
       },
@@ -1952,7 +1981,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         currency: 'HUF',
         pocketId: otpPocket.id,
         categoryName: 'Shopping',
-        merchant: 'Bulk Test 1',
+        merchant: 'Mock Bulk Shop 1',
         note: 'First bulk test',
         needsApproval: 1,
       },
@@ -2216,7 +2245,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
         body: JSON.stringify({
           package: 'hu.otpbank.mobilbank',
           title: 'OTP MobilBank',
-          text: 'Kártyás vásárlás: 9 990 HUF, Spar Autolog Push, Egyenleg: 200 000 HUF',
+          text: 'Kártyás vásárlás: 9 990 HUF, Mock Grocery Push, Egyenleg: 200 000 HUF',
         }),
       });
       assert.equal(webhookRes.status, 200);
@@ -2225,7 +2254,7 @@ test('MoneyManager End-to-End Verification Suite', async (t) => {
       }
       assert.equal(receivedPushes.length, 2);
       assert.ok(receivedPushes[1].payload.title.includes('-9,990 HUF'));
-      assert.ok(receivedPushes[1].payload.body.includes('Spar Autolog Push'));
+      assert.ok(receivedPushes[1].payload.body.includes('Mock Grocery Push'));
 
       // 3. Expired push endpoint (410) gets automatically pruned
       pushResponseCode = 410;
@@ -2287,20 +2316,20 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
     // Seed rich state on Instance A
     const accRes = await instA.req('/api/accounts', {
       method: 'POST',
-      body: { name: 'Nordea', currency: 'EUR', initialBalance: 500, color: '#0ea5e9' },
+      body: { name: 'MockNord Bank', currency: 'EUR', initialBalance: 500, color: '#0ea5e9' },
     });
     assert.equal(accRes.status, 201);
-    const nordeaId = accRes.data.accountId;
+    const mockBankId = accRes.data.accountId;
 
     const pRes = await instA.req('/api/pockets', {
       method: 'POST',
-      body: { accountId: nordeaId, name: 'Vault', currency: 'EUR', initialBalance: 100 },
+      body: { accountId: mockBankId, name: 'Vault', currency: 'EUR', initialBalance: 100 },
     });
     assert.equal(pRes.status, 201);
     const vaultId = pRes.data.pocket.id;
 
     const dashA0 = await instA.req('/api/dashboard');
-    const nordeaMainId = dashA0.data.accounts.find((a) => a.id === nordeaId).pockets.find((p) => p.is_default === 1).id;
+    const mockBankMainId = dashA0.data.accounts.find((a) => a.id === mockBankId).pockets.find((p) => p.is_default === 1).id;
     const shopCatId = dashA0.data.categories.find((c) => c.name === 'Shopping').id;
 
     const incTx = await instA.req('/api/transactions', {
@@ -2310,8 +2339,8 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
         type: 'income',
         amount: 200,
         currency: 'EUR',
-        pocketId: nordeaMainId,
-        merchant: 'Nordic Studio',
+        pocketId: mockBankMainId,
+        merchant: 'Mock Studio',
         note: 'Salary bonus',
         isRecurring: true,
       },
@@ -2325,10 +2354,10 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
         type: 'expense',
         amount: 35.5,
         currency: 'EUR',
-        pocketId: nordeaMainId,
+        pocketId: mockBankMainId,
         categoryId: shopCatId,
-        merchant: 'Local Bakery',
-        storeAddress: '1011 Helsinki, Main St 5',
+        merchant: 'Mock Bakery',
+        storeAddress: '101 Mock City, Mock St 5',
         items: [{ name: 'Bread', qty: 2, price: 8.5 }],
         note: 'Fresh bread',
       },
@@ -2343,7 +2372,7 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
         type: 'transfer',
         amount: 50,
         currency: 'EUR',
-        pocketId: nordeaMainId,
+        pocketId: mockBankMainId,
         destPocketId: vaultId,
         note: 'To savings vault',
       },
@@ -2357,7 +2386,7 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
       body: {
         imageBase64: `data:image/png;base64,${sampleImgBytes.toString('base64')}`,
         mimeType: 'image/png',
-        filename: 'bakery-proof.png',
+        filename: 'mock-bakery-proof.png',
         skipScan: true,
         attachToTxId: expTxId,
       },
@@ -2406,12 +2435,12 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
     assert.equal(restB.data.restoredCounts.receipts, 1);
 
     const dashB = await instB.req('/api/dashboard?limit=50');
-    const nordeaB = dashB.data.accounts.find((a) => a.name === 'Nordea');
-    assert.ok(nordeaB);
-    assert.equal(nordeaB.pockets.find((p) => p.name === 'Main').current_balance, 614.5);
-    assert.equal(nordeaB.pockets.find((p) => p.name === 'Vault').current_balance, 150);
-    const restoredExpB = dashB.data.transactions.find((t) => t.merchant === 'Local Bakery');
-    assert.equal(restoredExpB.store_address, '1011 Helsinki, Main St 5');
+    const mockBankB = dashB.data.accounts.find((a) => a.name === 'MockNord Bank');
+    assert.ok(mockBankB);
+    assert.equal(mockBankB.pockets.find((p) => p.name === 'Main').current_balance, 614.5);
+    assert.equal(mockBankB.pockets.find((p) => p.name === 'Vault').current_balance, 150);
+    const restoredExpB = dashB.data.transactions.find((t) => t.merchant === 'Mock Bakery');
+    assert.equal(restoredExpB.store_address, '101 Mock City, Mock St 5');
     assert.equal(restoredExpB.receipt_path, receiptName);
     const recFileRes = await fetch(`${instB.base}/api/receipts/file/${encodeURIComponent(receiptName)}`, {
       headers: { Cookie: instB.cookie },
@@ -2431,9 +2460,9 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
     assert.equal(mergeC.status, 200);
     const dashC = await instC.req('/api/dashboard?limit=50');
     assert.ok(dashC.data.accounts.some((a) => a.name === 'Local Checking'));
-    const nordeaC = dashC.data.accounts.find((a) => a.name === 'Nordea');
-    assert.ok(nordeaC);
-    assert.equal(nordeaC.pockets.find((p) => p.name === 'Vault').current_balance, 150);
+    const mockBankC = dashC.data.accounts.find((a) => a.name === 'MockNord Bank');
+    assert.ok(mockBankC);
+    assert.equal(mockBankC.pockets.find((p) => p.name === 'Vault').current_balance, 150);
 
     // Re-import universal CSV on Instance D
     const csvB64 = Buffer.from(exportCsvRes.text, 'utf8').toString('base64');
@@ -2456,10 +2485,10 @@ test('Lossless Full JSON Backup Export & Restore (replace & merge) + Universal C
     assert.equal(commitD.status, 200);
     assert.equal(commitD.data.importedCount, 3);
     const dashD = await instD.req('/api/dashboard?limit=50');
-    const nordeaD = dashD.data.accounts.find((a) => a.name === 'Nordea');
-    assert.ok(nordeaD);
+    const mockBankD = dashD.data.accounts.find((a) => a.name === 'MockNord Bank');
+    assert.ok(mockBankD);
     assert.equal(dashD.data.transactions.find((t) => t.type === 'transfer').dest_pocket_name, 'Vault');
-    assert.equal(dashD.data.transactions.find((t) => t.merchant === 'Local Bakery').store_address, '1011 Helsinki, Main St 5');
+    assert.equal(dashD.data.transactions.find((t) => t.merchant === 'Mock Bakery').store_address, '101 Mock City, Mock St 5');
   } finally {
     instA.close();
     instB.close();
@@ -2511,7 +2540,7 @@ test('Safe schema migration on existing DB without needs_approval and auto_sourc
       "INSERT INTO pockets (id, account_id, name, currency, initial_balance, current_balance, color, icon, is_default) VALUES (99, 99, 'LegacyReserve', 'HUF', 0, 210000, '#10b981', 'wallet', 1)"
     ).run();
     migrated.prepare(
-      "INSERT INTO transactions (date, type, amount, currency, account_id, pocket_id, category_name, merchant, note, note_source, is_historical, recorded_pocket_balance_after, created_at) VALUES ('2026-10-01', 'income', 210000, 'HUF', 99, 99, 'Work / Salary', 'Boss', 'Legacy row', 'import', 1, 210000, '2026-10-01')"
+      "INSERT INTO transactions (date, type, amount, currency, account_id, pocket_id, category_name, merchant, note, note_source, is_historical, recorded_pocket_balance_after, created_at) VALUES ('2026-10-01', 'income', 210000, 'HUF', 99, 99, 'Work / Salary', 'Mock Employer', 'Legacy row', 'import', 1, 210000, '2026-10-01')"
     ).run();
     migrated.close();
 
@@ -2587,7 +2616,7 @@ test('Flag-based historical transaction logic (balances, PATCH toggle, auto-note
         amount: 2000,
         currency: 'HUF',
         pocketId,
-        merchant: 'LiveCafe',
+        merchant: 'Mock LiveCafe',
         note: 'coffee',
         isHistorical: false,
       },
@@ -2610,7 +2639,7 @@ test('Flag-based historical transaction logic (balances, PATCH toggle, auto-note
         currency: 'HUF',
         pocketId,
         categoryName: 'Shopping',
-        merchant: 'OldStore',
+        merchant: 'Mock OldStore',
         note: '',
         isHistorical: true,
       },
@@ -2709,87 +2738,87 @@ test('OTP Sikeres vásárlás notification extraction & smart counterparty pairi
   // Seed initial counterparties
   await reqJson('/api/transactions', {
     method: 'POST',
-    body: { date: '2026-11-01', type: 'income', amount: 300000, currency: 'HUF', pocketId: otpPocketId, categoryId: salaryCatId, merchant: 'Acme' },
+    body: { date: '2026-11-01', type: 'income', amount: 300000, currency: 'HUF', pocketId: otpPocketId, categoryId: salaryCatId, merchant: 'Mock Employer Corp.' },
   }, cookie);
   await reqJson('/api/transactions', {
     method: 'POST',
-    body: { date: '2026-11-02', type: 'expense', amount: 2500, currency: 'HUF', pocketId: otpPocketId, categoryId: shopCatId, merchant: 'TESCO-GLOBAL ZRT.' },
+    body: { date: '2026-11-02', type: 'expense', amount: 2500, currency: 'HUF', pocketId: otpPocketId, categoryId: shopCatId, merchant: 'MOCKMART-GLOBAL ZRT.' },
   }, cookie);
   await reqJson('/api/transactions', {
     method: 'POST',
-    body: { date: '2026-11-03', type: 'expense', amount: 5500, currency: 'HUF', pocketId: otpPocketId, categoryId: shopCatId, merchant: 'Tesco/Pepco/Jysk' },
+    body: { date: '2026-11-03', type: 'expense', amount: 5500, currency: 'HUF', pocketId: otpPocketId, categoryId: shopCatId, merchant: 'MockMart/MockHome/MockDecor' },
   }, cookie);
   await reqJson('/api/transactions', {
     method: 'POST',
-    body: { date: '2026-11-04', type: 'income', amount: 1000, currency: 'HUF', pocketId: revPocketId, categoryId: familyCatId, merchant: 'Kovacs Anna Maria' },
+    body: { date: '2026-11-04', type: 'income', amount: 1000, currency: 'HUF', pocketId: revPocketId, categoryId: familyCatId, merchant: 'Beta Alpha Mock Person' },
   }, cookie);
 
-  // 1. Exact OTP screenshot notification: "Sikeres vásárlás!" + "...a METRO BISTRO ÉTTEREM kereskedőnél."
+  // 1. Exact OTP screenshot notification: "Sikeres vásárlás!" + "...a MOCK CANTEEN BISTRO ÉTTEREM kereskedőnél."
   const bistroRes = await reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
     method: 'POST',
     body: {
       app: 'OTP Bank',
       title: 'Sikeres vásárlás!',
-      text: '-1 590 Ft értékben sikeresen vásároltál a METRO BISTRO ÉTTEREM kereskedőnél.',
+      text: '-1 590 Ft értékben sikeresen vásároltál a MOCK CANTEEN BISTRO ÉTTEREM kereskedőnél.',
     },
   });
   assert.equal(bistroRes.status, 200);
   assert.equal(bistroRes.data.logged, true);
   assert.equal(bistroRes.data.transaction.type, 'expense');
   assert.equal(bistroRes.data.transaction.amount, 1590);
-  assert.equal(bistroRes.data.transaction.merchant, 'METRO BISTRO ÉTTEREM');
+  assert.equal(bistroRes.data.transaction.merchant, 'MOCK CANTEEN BISTRO ÉTTEREM');
   assert.equal(bistroRes.data.transaction.category_name, 'Food & Dining');
 
-  // 2. OTP online purchase notification: "Sikeres Online vásárlás!" + "...a(z) CRV*TESCO 12345 ONKISZ webshopjában." -> pairs to "TESCO-GLOBAL ZRT."
-  const tescoOnlineRes = await reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
+  // 2. OTP online purchase notification: "Sikeres Online vásárlás!" + "...a(z) CRV*MOCKMART 12345 ONKISZ webshopjában." -> pairs to "MOCKMART-GLOBAL ZRT."
+  const mockMartOnlineRes = await reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
     method: 'POST',
     body: {
       app: 'OTP Bank',
       title: 'Sikeres Online vásárlás!',
-      text: '-2 127 Ft értékben sikeresen vásároltál a(z) CRV*TESCO 12345 ONKISZ webshopjában.',
+      text: '-2 127 Ft értékben sikeresen vásároltál a(z) CRV*MOCKMART 12345 ONKISZ webshopjában.',
     },
   });
-  assert.equal(tescoOnlineRes.status, 200);
-  assert.equal(tescoOnlineRes.data.logged, true);
-  assert.equal(tescoOnlineRes.data.transaction.amount, 2127);
-  assert.equal(tescoOnlineRes.data.transaction.merchant, 'TESCO-GLOBAL ZRT.');
-  assert.equal(tescoOnlineRes.data.transaction.category_name, 'Shopping');
+  assert.equal(mockMartOnlineRes.status, 200);
+  assert.equal(mockMartOnlineRes.data.logged, true);
+  assert.equal(mockMartOnlineRes.data.transaction.amount, 2127);
+  assert.equal(mockMartOnlineRes.data.transaction.merchant, 'MOCKMART-GLOBAL ZRT.');
+  assert.equal(mockMartOnlineRes.data.transaction.category_name, 'Shopping');
 
   // Ensure generic notification titles are NEVER stored in counterparties
   let cpRes = await reqJson('/api/counterparties', {}, cookie);
   const allCpNames = [...cpRes.data.counterparties.in, ...cpRes.data.counterparties.out].map((c) => c.name.toLowerCase());
   assert.equal(allCpNames.some((n) => n.includes('sikeres vásárlás') || n.includes('sikeres online vásárlás')), false);
-  assert.equal(allCpNames.some((n) => n.includes('crv*tesco')), false);
+  assert.equal(allCpNames.some((n) => n.includes('crv*mockmart')), false);
 
-  // 3. When both "Tesco" and "TESCO-GLOBAL ZRT." exist, target the closer match for each variant
+  // 3. When both "MockMart" and "MOCKMART-GLOBAL ZRT." exist, target the closer match for each variant
   await reqJson('/api/transactions', {
     method: 'POST',
-    body: { date: '2026-11-05', type: 'expense', amount: 1200, currency: 'HUF', pocketId: otpPocketId, categoryId: shopCatId, merchant: 'Tesco' },
+    body: { date: '2026-11-05', type: 'expense', amount: 1200, currency: 'HUF', pocketId: otpPocketId, categoryId: shopCatId, merchant: 'MockMart' },
   }, cookie);
-  assert.equal(findBestMatchingCounterparty(db, 'TESCO-GLOBAL ZRT', 'out').counterparty.name, 'TESCO-GLOBAL ZRT.');
-  const tescoSimpleRes = await reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
+  assert.equal(findBestMatchingCounterparty(db, 'MOCKMART-GLOBAL ZRT', 'out').counterparty.name, 'MOCKMART-GLOBAL ZRT.');
+  const mockMartSimpleRes = await reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
     method: 'POST',
     body: {
       app: 'OTP Bank',
       title: 'Sikeres Online vásárlás!',
-      text: '-999 Ft értékben sikeresen vásároltál a(z) CRV*TESCO 12345 ONKISZ webshopjában.',
+      text: '-999 Ft értékben sikeresen vásároltál a(z) CRV*MOCKMART 12345 ONKISZ webshopjában.',
     },
   });
-  assert.equal(tescoSimpleRes.status, 200);
-  assert.equal(tescoSimpleRes.data.transaction.merchant, 'Tesco');
+  assert.equal(mockMartSimpleRes.status, 200);
+  assert.equal(mockMartSimpleRes.data.transaction.merchant, 'MockMart');
 
-  // 4. Revolut P2P name-order pairing: "Anna Maria Kovacs" -> pairs to existing "Kovacs Anna Maria" + inherits category
+  // 4. Revolut P2P name-order pairing: "Mock Person Alpha Beta" -> pairs to existing "Beta Alpha Mock Person" + inherits category
   const revPairRes = await reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
     method: 'POST',
     body: {
       app: 'Revolut',
-      title: 'Anna Maria Kovacs',
+      title: 'Mock Person Alpha Beta',
       text: 'Sent you HUF 1,600. Tap to say thank you 💰',
     },
   });
   assert.equal(revPairRes.status, 200);
   assert.equal(revPairRes.data.logged, true);
-  assert.equal(revPairRes.data.transaction.merchant, 'Kovacs Anna Maria');
+  assert.equal(revPairRes.data.transaction.merchant, 'Beta Alpha Mock Person');
   assert.equal(revPairRes.data.transaction.category_name, 'Family & Gifts');
 
   // 5. Unrelated new merchant must NOT be force-paired and is added as a new counterparty
@@ -2798,14 +2827,14 @@ test('OTP Sikeres vásárlás notification extraction & smart counterparty pairi
     body: {
       app: 'OTP Bank',
       title: 'Sikeres vásárlás!',
-      text: '-2 400 Ft értékben sikeresen vásároltál a Boulangerie Artisanale kereskedőnél.',
+      text: '-2 400 Ft értékben sikeresen vásároltál a Mock Artisan Bakery kereskedőnél.',
     },
   });
   assert.equal(unrelatedRes.status, 200);
   assert.equal(unrelatedRes.data.logged, true);
-  assert.equal(unrelatedRes.data.transaction.merchant, 'Boulangerie Artisanale');
+  assert.equal(unrelatedRes.data.transaction.merchant, 'Mock Artisan Bakery');
   cpRes = await reqJson('/api/counterparties', {}, cookie);
-  assert.ok(cpRes.data.counterparties.out.some((c) => c.name === 'Boulangerie Artisanale'));
+  assert.ok(cpRes.data.counterparties.out.some((c) => c.name === 'Mock Artisan Bakery'));
 });
 
 test('Scheduled backups: retention engine, local & remote FTP end-to-end, encryption, capabilities & restore', async (t) => {
@@ -3084,7 +3113,7 @@ test('Scheduled backups: retention engine, local & remote FTP end-to-end, encryp
   const pocketId = initDash.data.accounts[0].pockets[0].id;
   await reqJson('/api/transactions', {
     method: 'POST',
-    body: { date: '2026-11-18', type: 'expense', amount: 4200, currency: 'HUF', pocketId, categoryName: 'Shopping', merchant: 'TestShop', note: 'Backup test tx' },
+    body: { date: '2026-11-18', type: 'expense', amount: 4200, currency: 'HUF', pocketId, categoryName: 'Shopping', merchant: 'Mock Backup Shop', note: 'Backup test tx' },
   }, cookie);
 
   // Pre-seed 2 older local backups and 2 older remote FTP backups to test independent retention limits:
@@ -3192,7 +3221,7 @@ test('Scheduled backups: retention engine, local & remote FTP end-to-end, encryp
   assert.equal(remoteRestore.data.ok, true);
   const restoredDash = await reqJson('/api/dashboard', {}, cookie);
   assert.equal(restoredDash.data.transactions.length, 1);
-  assert.equal(restoredDash.data.transactions[0].merchant, 'TestShop');
+  assert.equal(restoredDash.data.transactions[0].merchant, 'Mock Backup Shop');
 
   // Delete one local and one remote backup via API
   const delLocal = await reqJson(`/api/backups/local/${encodeURIComponent(oldL1)}`, { method: 'DELETE' }, cookie);
@@ -3391,7 +3420,7 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
     '/api/transactions',
     {
       method: 'POST',
-      body: { date: '2026-10-05T10:00', type: 'expense', amount: 5000, currency: 'HUF', pocketId: pocketA.id, categoryName: 'Groceries', merchant: 'Spar' },
+      body: { date: '2026-10-05T10:00', type: 'expense', amount: 5000, currency: 'HUF', pocketId: pocketA.id, categoryName: 'Groceries', merchant: 'Mock Grocery' },
     },
     cookie
   );
@@ -3399,7 +3428,7 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
     '/api/transactions',
     {
       method: 'POST',
-      body: { date: '2026-10-12T14:00', type: 'expense', amount: 15000, currency: 'HUF', pocketId: pocketA.id, categoryName: 'Shopping', merchant: 'Ikea' },
+      body: { date: '2026-10-12T14:00', type: 'expense', amount: 15000, currency: 'HUF', pocketId: pocketA.id, categoryName: 'Shopping', merchant: 'Mock Furniture Store' },
     },
     cookie
   );
@@ -3407,7 +3436,7 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
     '/api/transactions',
     {
       method: 'POST',
-      body: { date: '2026-11-02T19:00', type: 'expense', amount: 20, currency: 'EUR', pocketId: pocketB.id, categoryName: 'Dining Out', merchant: 'Bistro' },
+      body: { date: '2026-11-02T19:00', type: 'expense', amount: 20, currency: 'EUR', pocketId: pocketB.id, categoryName: 'Dining Out', merchant: 'Mock Bistro' },
     },
     cookie
   );
@@ -3415,7 +3444,7 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
     '/api/transactions',
     {
       method: 'POST',
-      body: { date: '2026-11-01T09:00', type: 'income', amount: 80000, currency: 'HUF', pocketId: pocketA.id, categoryName: 'Salary', merchant: 'Acme Corp' },
+      body: { date: '2026-11-01T09:00', type: 'income', amount: 80000, currency: 'HUF', pocketId: pocketA.id, categoryName: 'Salary', merchant: 'Mock Employer Corp.' },
     },
     cookie
   );
@@ -3430,7 +3459,7 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
         currency: 'HUF',
         pocketId: pocketA.id,
         categoryName: 'Shopping',
-        merchant: 'ExcludedItem',
+        merchant: 'Mock Excluded Shop',
         excludeFromAnalytics: true,
       },
     },
@@ -3458,7 +3487,7 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
   assert.equal(exclDash.data.analyticsScope.mode, 'filtered');
   assert.equal(exclDash.data.analyticsScope.includeExcluded, true);
   assert.equal(exclDash.data.kpis.periodExpenseHuf, 4000);
-  assert.equal(exclDash.data.charts.topMerchants[0].name, 'ExcludedItem');
+  assert.equal(exclDash.data.charts.topMerchants[0].name, 'Mock Excluded Shop');
 
   // 3. Explicit selectedIds calculates KPIs, category/merchant charts, monthly cashflow & wealthDistribution strictly from checked rows
   const selDash = await reqJson(
@@ -3479,12 +3508,432 @@ test('Charts & KPIs sync with filtered or selected ledger transactions (includin
   assert.equal(selDash.data.charts.wealthDistribution[0].pct, 100);
 
   // 4. chartsScope=all unlinks charts/KPIs from ledger filters while keeping ledger rows filtered
-  const unlinkedDash = await reqJson('/api/dashboard?month=all&search=Ikea&chartsScope=all', {}, cookie);
+  const unlinkedDash = await reqJson('/api/dashboard?month=all&search=Mock%20Furniture%20Store&chartsScope=all', {}, cookie);
   assert.equal(unlinkedDash.status, 200);
   assert.equal(unlinkedDash.data.transactions.length, 1);
-  assert.equal(unlinkedDash.data.transactions[0].merchant, 'Ikea');
+  assert.equal(unlinkedDash.data.transactions[0].merchant, 'Mock Furniture Store');
   assert.equal(unlinkedDash.data.analyticsScope.mode, 'all');
   assert.equal(unlinkedDash.data.analyticsScope.chartsScope, 'all');
   assert.equal(unlinkedDash.data.kpis.periodIncomeHuf, 80000);
   assert.ok(unlinkedDash.data.kpis.periodExpenseHuf > 20000);
+});
+
+test('Deleted transaction trash & restore: single/bulk undo, receipt retention, timeframe expiry, and settings toggle', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-trash-test-'));
+  const receiptsDir = path.join(tmpDir, 'receipts');
+  const app = createApp({
+    dataDir: tmpDir,
+    dbPath: path.join(tmpDir, 'trash.db'),
+    receiptsDir,
+    skipInitialCsvImport: true,
+    rateLimit: false,
+  });
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  const { port } = app.server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  t.after(() => {
+    app.server.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const reqJson = async (p, opts = {}, cookie = '') => {
+    const res = await fetch(`${baseUrl}${p}`, {
+      method: opts.method || 'GET',
+      headers: {
+        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const text = await res.text();
+    return { status: res.status, headers: res.headers, data: text ? JSON.parse(text) : {} };
+  };
+
+  const setup = await reqJson('/api/auth/setup', {
+    method: 'POST',
+    body: { username: 'trashtester', password: 'StrongPassword123' },
+  });
+  assert.equal(setup.status, 201);
+  const cookie = setup.headers.get('set-cookie').split(';')[0];
+
+  const initDash = await reqJson('/api/dashboard', {}, cookie);
+  assert.equal(initDash.data.deletedTxCount, 0);
+  assert.equal(initDash.data.trashRetentionMinutes, 43200);
+  const mainPocket = initDash.data.accounts[0].pockets[0];
+
+  // Create transaction with a receipt attached via dummy file + DB receipt_path
+  const tx1Res = await reqJson(
+    '/api/transactions',
+    {
+      method: 'POST',
+      body: { date: '2026-11-12T10:00', type: 'expense', amount: 3500, currency: 'HUF', pocketId: mainPocket.id, categoryName: 'Shopping', merchant: 'Mock Trash Market', note: 'Keep me safe' },
+    },
+    cookie
+  );
+  assert.equal(tx1Res.status, 201);
+  const tx1Id = tx1Res.data.transaction.id;
+  const dummyReceiptName = 'receipt-trash-test.jpg';
+  fs.mkdirSync(receiptsDir, { recursive: true });
+  fs.writeFileSync(path.join(receiptsDir, dummyReceiptName), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  app.db.prepare('UPDATE transactions SET receipt_path = ? WHERE id = ?').run(dummyReceiptName, tx1Id);
+
+  const tx2Res = await reqJson(
+    '/api/transactions',
+    {
+      method: 'POST',
+      body: { date: '2026-11-13T12:00', type: 'income', amount: 10000, currency: 'HUF', pocketId: mainPocket.id, categoryName: 'Salary', merchant: 'Mock Bonus' },
+    },
+    cookie
+  );
+  assert.equal(tx2Res.status, 201);
+  const tx2Id = tx2Res.data.transaction.id;
+
+  // 1. Delete single transaction -> moves to trash, updates balance, preserves receipt file on disk
+  const delSingle = await reqJson(`/api/transactions/${tx1Id}`, { method: 'DELETE' }, cookie);
+  assert.equal(delSingle.status, 200);
+  assert.ok(delSingle.data.trashId > 0);
+  assert.equal(fs.existsSync(path.join(receiptsDir, dummyReceiptName)), true);
+
+  const dashAfterDel = await reqJson('/api/dashboard', {}, cookie);
+  assert.equal(dashAfterDel.data.deletedTxCount, 1);
+  assert.equal(dashAfterDel.data.accounts[0].pockets[0].current_balance, 10000);
+
+  const trashList = await reqJson('/api/transactions/trash', {}, cookie);
+  assert.equal(trashList.status, 200);
+  assert.equal(trashList.data.items.length, 1);
+  assert.equal(trashList.data.items[0].merchant, 'Mock Trash Market');
+  assert.ok(trashList.data.items[0].remainingMs > 0);
+
+  // 2. Restore from trash within timeframe -> recovers original transaction ID, receipt file, note & balance
+  const restoreSingle = await reqJson(
+    '/api/transactions/trash/restore',
+    { method: 'POST', body: { ids: [delSingle.data.trashId] } },
+    cookie
+  );
+  assert.equal(restoreSingle.status, 200);
+  assert.equal(restoreSingle.data.restoredCount, 1);
+  assert.deepEqual(restoreSingle.data.restoredIds, [tx1Id]);
+
+  const dashAfterRestore = await reqJson('/api/dashboard', {}, cookie);
+  assert.equal(dashAfterRestore.data.deletedTxCount, 0);
+  assert.equal(dashAfterRestore.data.accounts[0].pockets[0].current_balance, 6500);
+  const recovered = dashAfterRestore.data.transactions.find((x) => x.id === tx1Id);
+  assert.ok(recovered);
+  assert.equal(recovered.note, 'Keep me safe');
+  assert.equal(recovered.receipt_path, dummyReceiptName);
+
+  // 3. Bulk delete both & restore all
+  const bulkDel = await reqJson(
+    '/api/transactions/bulk',
+    { method: 'POST', body: { ids: [tx1Id, tx2Id], action: 'delete' } },
+    cookie
+  );
+  assert.equal(bulkDel.status, 200);
+  assert.equal(bulkDel.data.trashIds.length, 2);
+  assert.equal((await reqJson('/api/dashboard', {}, cookie)).data.accounts[0].pockets[0].current_balance, 0);
+
+  const restoreAll = await reqJson(
+    '/api/transactions/trash/restore',
+    { method: 'POST', body: { all: true } },
+    cookie
+  );
+  assert.equal(restoreAll.status, 200);
+  assert.equal(restoreAll.data.restoredCount, 2);
+  assert.equal((await reqJson('/api/dashboard', {}, cookie)).data.accounts[0].pockets[0].current_balance, 6500);
+
+  // 4. Expiration: once timeframe expires, restore returns 410 and purges orphaned receipt file from disk
+  const delExpire = await reqJson(`/api/transactions/${tx1Id}`, { method: 'DELETE' }, cookie);
+  app.db
+    .prepare('UPDATE deleted_transactions SET expires_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - 60000).toISOString(), delExpire.data.trashId);
+
+  const expiredRestore = await reqJson(
+    '/api/transactions/trash/restore',
+    { method: 'POST', body: { ids: [delExpire.data.trashId] } },
+    cookie
+  );
+  assert.equal(expiredRestore.status, 410);
+  assert.equal(fs.existsSync(path.join(receiptsDir, dummyReceiptName)), false);
+  assert.equal((await reqJson('/api/dashboard', {}, cookie)).data.deletedTxCount, 0);
+
+  // 5. Disabling retention window (0 minutes) deletes permanently immediately
+  const updSet = await reqJson('/api/settings', { method: 'PUT', body: { trashRetentionMinutes: 0 } }, cookie);
+  assert.equal(updSet.status, 200);
+  assert.equal(updSet.data.trashRetentionMinutes, 0);
+  const permDel = await reqJson(`/api/transactions/${tx2Id}`, { method: 'DELETE' }, cookie);
+  assert.equal(permDel.status, 200);
+  assert.equal(permDel.data.trashId, null);
+  assert.equal((await reqJson('/api/dashboard', {}, cookie)).data.deletedTxCount, 0);
+});
+
+test('Bank notification recognition: Qvik requests/payments, Revolut emoji titles, refunds, own-pocket & cross-bank transfers', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-notif-v2-test-'));
+  const { server } = createApp({
+    dataDir: tmpDir,
+    dbPath: path.join(tmpDir, 'test.db'),
+    receiptsDir: path.join(tmpDir, 'receipts'),
+    skipInitialCsvImport: true,
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  t.after(() => {
+    server.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  async function reqJson(pathname, opts = {}, cookie = '') {
+    const res = await fetch(`${baseUrl}${pathname}`, {
+      method: opts.method || 'GET',
+      headers: {
+        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data, setCookie: res.headers.get('set-cookie') };
+  }
+
+  const setupRes = await reqJson('/api/auth/setup', {
+    method: 'POST',
+    body: { username: 'admin', password: 'StrongPassword123!' },
+  });
+  assert.equal(setupRes.status, 201);
+  const cookie = setupRes.setCookie.split(';')[0];
+
+  await reqJson('/api/accounts', { method: 'POST', body: { name: 'OTP', currency: 'HUF', initialBalance: 200000 } }, cookie);
+  await reqJson('/api/accounts', { method: 'POST', body: { name: 'Revolut', currency: 'HUF', initialBalance: 100000 } }, cookie);
+
+  const dash = await reqJson('/api/dashboard', {}, cookie);
+  const otpAcc = dash.data.accounts.find((a) => a.name === 'OTP');
+  const revAcc = dash.data.accounts.find((a) => a.name === 'Revolut');
+  const otpMainId = otpAcc.pockets.find((p) => p.is_default === 1).id;
+  await reqJson(`/api/pockets/${otpMainId}`, { method: 'PATCH', body: { name: 'Fő számla' } }, cookie);
+  await reqJson('/api/pockets', {
+    method: 'POST',
+    body: { accountId: otpAcc.id, name: 'persely számla', currency: 'HUF', initialBalance: 100000 },
+  }, cookie);
+  await reqJson('/api/pockets', {
+    method: 'POST',
+    body: { accountId: otpAcc.id, name: 'Mock Goal Pocket', currency: 'HUF', initialBalance: 50000 },
+  }, cookie);
+  assert.ok(revAcc);
+
+  const settingsRes = await reqJson('/api/settings', {}, cookie);
+  const token = settingsRes.data.webhookToken;
+
+  async function postWebhook(payload) {
+    return reqJson(`/api/notifications/webhook?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  // 1. Qvik & Hungarian payment requests must be ignored cleanly (even with amounts/verbs)
+  const qvikReq1 = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Qvik kérelmet kaptál',
+    text: 'Mock Recipient One 2 000 Ft összegű qvik fizetési kérelmet küldött.',
+  });
+  assert.equal(qvikReq1.status, 200);
+  assert.equal(qvikReq1.data.logged, false);
+  assert.equal(qvikReq1.data.ignored, true);
+
+  const qvikReq2 = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Fizetési kérelmet kaptál',
+    text: '5 000 Ft fizetési kérelem érkezett.',
+  });
+  assert.equal(qvikReq2.status, 200);
+  assert.equal(qvikReq2.data.logged, false);
+  assert.equal(qvikReq2.data.ignored, true);
+
+  // 2. Completed Qvik payments extract real recipient, NOT "Qvik fizetés"
+  const qvikPay1 = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Qvik fizetés',
+    text: '-2 000 Ft, Mock Bookstore',
+  });
+  assert.equal(qvikPay1.status, 200);
+  assert.equal(qvikPay1.data.logged, true);
+  assert.equal(qvikPay1.data.transaction.type, 'expense');
+  assert.equal(qvikPay1.data.transaction.amount, 2000);
+  assert.equal(qvikPay1.data.transaction.merchant, 'Mock Bookstore');
+
+  const qvikPay2 = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Sikeres Qvik fizetés!',
+    text: '-3 500 Ft értékben sikeresen fizettél a(z) Mock Cafe részére.',
+  });
+  assert.equal(qvikPay2.status, 200);
+  assert.equal(qvikPay2.data.logged, true);
+  assert.equal(qvikPay2.data.transaction.type, 'expense');
+  assert.equal(qvikPay2.data.transaction.amount, 3500);
+  assert.equal(qvikPay2.data.transaction.merchant, 'Mock Cafe');
+
+  // 3. Revolut emoji status titles must NOT overwrite body counterparty; "with a GIF!" must still log
+  const revSent = await postWebhook({
+    app: 'Revolut',
+    title: 'Transfer sent ✅',
+    text: 'You sent 72\u00A0100\u00A0HUF to Mock Recipient One. It will arrive in seconds',
+  });
+  assert.equal(revSent.status, 200);
+  assert.equal(revSent.data.logged, true);
+  assert.equal(revSent.data.transaction.type, 'expense');
+  assert.equal(revSent.data.transaction.amount, 72100);
+  assert.equal(revSent.data.transaction.merchant, 'Mock Recipient One');
+
+  const revRefund = await postWebhook({
+    app: 'Revolut',
+    title: 'Refund arrived  🎉',
+    text: "You've received a payment refund of HUF72,100 from Mock Electronics Store",
+  });
+  assert.equal(revRefund.status, 200);
+  assert.equal(revRefund.data.logged, true);
+  assert.equal(revRefund.data.transaction.type, 'income');
+  assert.equal(revRefund.data.transaction.amount, 72100);
+  assert.equal(revRefund.data.transaction.merchant, 'Mock Electronics Store');
+
+  const revPaidEmoji = await postWebhook({
+    app: 'Revolut',
+    title: 'Mock Electronics Store',
+    text: '🛍 Paid 72\u00A0100\u00A0HUF at Mock Electronics Store ⚠️ HUF Balance: 0,50\u00A0HUF',
+  });
+  assert.equal(revPaidEmoji.status, 200);
+  assert.equal(revPaidEmoji.data.logged, true);
+  assert.equal(revPaidEmoji.data.transaction.type, 'expense');
+  assert.equal(revPaidEmoji.data.transaction.amount, 72100);
+  assert.equal(revPaidEmoji.data.transaction.merchant, 'Mock Electronics Store');
+  assert.equal(revPaidEmoji.data.parsed.balance_after, 0.5);
+
+  const revGif = await postWebhook({
+    app: 'Revolut',
+    title: 'Mock Person Alpha Beta',
+    text: 'Has sent you HUF15,000 with a GIF! 💸',
+  });
+  assert.equal(revGif.status, 200);
+  assert.equal(revGif.data.logged, true);
+  assert.equal(revGif.data.transaction.type, 'income');
+  assert.equal(revGif.data.transaction.amount, 15000);
+  assert.equal(revGif.data.transaction.merchant, 'Mock Person Alpha Beta');
+
+  // 4. Pending refund (even with amount) & transaction approval prompts must be ignored
+  const pendingRefund = await postWebhook({
+    app: 'Revolut',
+    title: 'Refund is on the way 😎',
+    text: 'Mock Electronics Store has initiated a refund of HUF 12,000. You can expect to receive it in around 5 days',
+  });
+  assert.equal(pendingRefund.status, 200);
+  assert.equal(pendingRefund.data.logged, false);
+  assert.equal(pendingRefund.data.ignored, true);
+
+  const approvalPrompt = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Jóváhagyod a tranzakciót?',
+    text: 'Revolut**9999*, 54503 HUF',
+  });
+  assert.equal(approvalPrompt.status, 200);
+  assert.equal(approvalPrompt.data.logged, false);
+  assert.equal(approvalPrompt.data.ignored, true);
+
+  // 5. Own-pocket transfer direction (+ withdraws from pocket to Main; - sends from Main to pocket)
+  const fromPersely = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Azonnali átutalás',
+    text: '🎉 +71 110 Ft, PERSELY SZÁMLA',
+  });
+  assert.equal(fromPersely.status, 200);
+  assert.equal(fromPersely.data.logged, true);
+  assert.equal(fromPersely.data.transaction.type, 'transfer');
+  assert.equal(fromPersely.data.transaction.account_name, 'OTP');
+  assert.equal(fromPersely.data.transaction.pocket_name, 'persely számla');
+  assert.equal(fromPersely.data.transaction.dest_pocket_name, 'Fő számla');
+  assert.equal(fromPersely.data.transaction.merchant, '');
+
+  const fromPerselyDup = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Azonnali átutalás',
+    text: '🎉 +71 110 Ft, PERSELY SZÁMLA',
+  });
+  assert.equal(fromPerselyDup.status, 200);
+  assert.equal(fromPerselyDup.data.logged, false);
+  assert.equal(fromPerselyDup.data.duplicate, true);
+
+  const toCustomPocket = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Azonnali átutalás',
+    text: '-72 100 Ft, Mock Goal Pocket',
+  });
+  assert.equal(toCustomPocket.status, 200);
+  assert.equal(toCustomPocket.data.logged, true);
+  assert.equal(toCustomPocket.data.transaction.type, 'transfer');
+  assert.equal(toCustomPocket.data.transaction.pocket_name, 'Fő számla');
+  assert.equal(toCustomPocket.data.transaction.dest_pocket_name, 'Mock Goal Pocket');
+  assert.equal(toCustomPocket.data.transaction.category_name, 'Pocket-to-Pocket Transfer');
+  assert.equal(toCustomPocket.data.transaction.merchant, '');
+
+  const fromCustomPocket = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Azonnali átutalás',
+    text: '+10 000 Ft, Mock Goal Pocket',
+  });
+  assert.equal(fromCustomPocket.status, 200);
+  assert.equal(fromCustomPocket.data.logged, true);
+  assert.equal(fromCustomPocket.data.transaction.type, 'transfer');
+  assert.equal(fromCustomPocket.data.transaction.pocket_name, 'Mock Goal Pocket');
+  assert.equal(fromCustomPocket.data.transaction.dest_pocket_name, 'Fő számla');
+  assert.equal(fromCustomPocket.data.transaction.category_name, 'Pocket-to-Pocket Transfer');
+  assert.equal(fromCustomPocket.data.transaction.merchant, '');
+
+  // 6. Cross-bank card top-up (OTP -> Revolut) vs real shop with "Revolut" in name
+  const topupRes = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Sikeres Online vásárlás!',
+    text: '-54 503 Ft értékben sikeresen vásároltál a(z) Revolut**9999* webshopjában.',
+  });
+  assert.equal(topupRes.status, 200);
+  assert.equal(topupRes.data.logged, true);
+  assert.equal(topupRes.data.transaction.type, 'transfer');
+  assert.equal(topupRes.data.transaction.account_name, 'OTP');
+  assert.equal(topupRes.data.transaction.pocket_name, 'Fő számla');
+  assert.equal(topupRes.data.transaction.dest_account_name, 'Revolut');
+  assert.equal(topupRes.data.transaction.dest_pocket_name, 'Main');
+  assert.equal(topupRes.data.transaction.category_name, 'Bank-to-Bank Transfer');
+  assert.equal(topupRes.data.transaction.merchant, '');
+
+  const revShopRes = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Sikeres Online vásárlás!',
+    text: '-4 500 Ft értékben sikeresen vásároltál a(z) Revolut Mock Shop webshopjában.',
+  });
+  assert.equal(revShopRes.status, 200);
+  assert.equal(revShopRes.data.logged, true);
+  assert.equal(revShopRes.data.transaction.type, 'expense');
+  assert.equal(revShopRes.data.transaction.merchant, 'Revolut Mock Shop');
+
+  // 7. Substring category guard ("Molnár" contains "mol" but must NOT become Fuel & Transport)
+  const molnarRes = await postWebhook({
+    app: 'OTP Bank',
+    title: 'Sikeres vásárlás!',
+    text: '-4 200 Ft értékben sikeresen vásároltál a Mock Molnár Bolt kereskedőnél.',
+  });
+  assert.equal(molnarRes.status, 200);
+  assert.equal(molnarRes.data.logged, true);
+  assert.equal(molnarRes.data.transaction.merchant, 'Mock Molnár Bolt');
+  assert.notEqual(molnarRes.data.transaction.category_name, 'Fuel & Transport');
+
+  // 8. Verify counterparty hygiene: zero generic titles, requests, or card masks leaked into counterparties
+  const cpRes = await reqJson('/api/counterparties', {}, cookie);
+  const allCpLower = [...cpRes.data.counterparties.in, ...cpRes.data.counterparties.out].map((c) =>
+    c.name.toLowerCase()
+  );
+  for (const forbidden of ['qvik', 'kérel', 'transfer sent', 'refund arrived', 'revolut**9999', 'mock goal pocket']) {
+    assert.equal(
+      allCpLower.some((name) => name.includes(forbidden)),
+      false,
+      `Forbidden counterparty fragment "${forbidden}" found in: ${JSON.stringify(allCpLower)}`
+    );
+  }
 });

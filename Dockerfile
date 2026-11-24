@@ -11,11 +11,19 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ARG APP_VERSION=""
+ARG APP_BUILD_NUMBER=""
+ARG APP_COMMIT_SHA=""
+ARG APP_BUILD_TIME=""
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
     DB_PATH=/app/data/moneymanager.db \
-    RECEIPTS_DIR=/app/data/receipts
+    RECEIPTS_DIR=/app/data/receipts \
+    APP_VERSION=${APP_VERSION} \
+    APP_BUILD_NUMBER=${APP_BUILD_NUMBER} \
+    APP_COMMIT_SHA=${APP_COMMIT_SHA} \
+    APP_BUILD_TIME=${APP_BUILD_TIME}
 
 COPY package.json ./
 COPY src/ ./src/

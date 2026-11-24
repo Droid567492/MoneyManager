@@ -4,6 +4,8 @@ const {
   getLocalIsoDate,
   getLocalIsoDateTime,
   createTransaction,
+  stripEmojisAndSymbols,
+  normalizeForMatch,
   isGenericCounterpartyName,
   cleanRawMerchantString,
   findBestMatchingCounterparty,
@@ -23,10 +25,13 @@ const SECURITY_OR_PIN_ALERT_REGEX =
   /(?:security\s+pin|change\s+(?:your\s+)?(?:security\s+)?pin|recommend(?:ed)?\s+to\s+change|update\s+(?:your\s+)?(?:pin|password|passcode|security)|pin\s+(?:change|changed|reminder|reset|blocked|unblocked)|password\s+(?:change|changed|reset|expiry|reminder)|security\s+(?:alert|notice|recommendation|tip|checkup|reminder|update)|new\s+(?:device|login|sign[- ]in)|logged\s+in\s+(?:from|on)|sign[- ]in\s+attempt|biztonsági\s+(?:pin|értesítés|figyelmeztetés|ajánlás|javaslat)|pin[- ]?kód\s*(?:csere|módosítás|változtatás)|jelszó\s*(?:csere|módosítás|változtatás|emlékeztető)|statement\s+is\s+ready|monthly\s+statement|számlakivonat|havi\s+kivonat|scheduled\s+maintenance|karbantartás)/i;
 
 const SOCIAL_OR_REQUEST_ALERT_REGEX =
-  /(?:\breacted\b[\s\S]{0,40}\bto\s+your\b|\bliked\s+your\s+(?:payment|transfer)\b|\breagált\b[\s\S]{0,40}\b(?:fizetésedre|utalásodra|tranzakciódra)\b|\b(?:requested|is\s+requesting)\b[^\n]{0,40}\bfrom\s+you\b|\bpayment\s+request\b|\bsplit\s+bill\s+request\b|\bfizetési\s+kérelem\b|\bsent\s+you\s+a\s+(?:message|gif|sticker)\b|\büzenetet\s+küldött\b)/i;
+  /(?:\breacted\b[\s\S]{0,40}\bto\s+your\b|\bliked\s+your\s+(?:payment|transfer)\b|\breagált\b[\s\S]{0,40}\b(?:fizetésedre|utalásodra|tranzakciódra)\b|\b(?:requested|is\s+requesting)\b[^\n]{0,40}\bfrom\s+you\b|\bpayment\s+request\b|\brequest\s+to\s+pay\b|\bmoney\s+request\b|\bsplit\s+bill\s+request\b|\bqvik[\s-]*(?:fizetési\s+)?kérel(?:em|met|med|mét|me|meket)\b|\bfizetési\s+kérel(?:em|met|med|mét|me)\b|\bkérel(?:em|met)\s+(?:kaptál|érkezett)\b|\bsent\s+you\s+a\s+(?:message|gif|sticker)\b|\büzenetet\s+küldött\b)/i;
 
 const FAILED_TX_ALERT_REGEX =
   /(?:\b(?:declined|transaction\s+failed|payment\s+failed|transfer\s+failed|unsuccessful|insufficient\s+(?:funds|balance)|could\s+not\s+be\s+processed|was\s+not\s+completed|card\s+(?:frozen|blocked))\b|\b(?:sikertelen\s+(?:vásárlás|fizetés|tranzakció|utalás)|elutasított\s+(?:vásárlás|fizetés|tranzakció|utalás)|elutasítva|visszautasítva|fedezethiány|kártya\s+zárolva)\b)/i;
+
+const PENDING_OR_APPROVAL_ALERT_REGEX =
+  /(?:\brefund\s+is\s+on\s+the\s+way\b|\binitiated\s+a\s+refund\b|\byou\s+can\s+expect\s+to\s+receive\s+it\b|\bvisszatérítés\s+úton\s+van\b|\bjóváhagyod\s+a\s+(?:tranzakciót|vásárlást|fizetést|utalást)\b|\b(?:approve|confirm)\s+(?:this|the)\s+(?:transaction|payment|purchase)\b|\bjóváhagyásra\s+vár\b)/i;
 
 const PROMO_OR_REMINDER_ALERT_REGEX =
   /(?:\b(?:invite\s+(?:friends?|a\s+friend)|refer\s+a\s+friend|earn\s+up\s+to|get\s+up\s+to|win\s+up\s+to|cashback\s+offer|special\s+offer|upgrade\s+to\s+(?:plus|premium|metal|ultra)|upcoming\s+(?:payment|transfer|bill|subscription)|is\s+due\s+(?:tomorrow|soon|in\s+\d+\s+days)|payment\s+reminder)\b|\b(?:hívd\s+meg|ajánld\s+ismerőseidnek|nyerj\s+akár|esedékes\s+holnap|fizetési\s+emlékeztető)\b)/i;
@@ -35,7 +40,7 @@ const UI_CTA_TAIL_REGEX =
   /(?:[.\s]*\btap\s+to\s+(?:say\s+thank\s+you|view|reply|open|see|check|confirm)[^.\n]*$|[.\s]*\bkoppints\s+(?:a|az|ide|a\s+részletekért)[^.\n]*$)/i;
 
 const GENERIC_TITLE_REGEX =
-  /^(?:otp(?:\s+bank|\s+mobilbank|\s+smartbank)?|erste(?:\s+bank|\s+george)?|george|revolut|wise|azonnali\s+átutalás|átutalás|beérkező\s+utalás|kimenő\s+utalás|kártyás\s+(?:vásárlás|fizetés|tranzakció)|bankkártyás\s+(?:vásárlás|fizetés)|sikeres\s+(?:online\s+|kártyás\s+|bankkártyás\s+|pos\s+)?(?:vásárlás|fizetés|tranzakció|átutalás|utalás|jóváírás|terhelés)|(?:online|sikeres)\s+(?:vásárlás|fizetés|tranzakció)|vásárlás|fizetés|tranzakció|értesítés|jóváírás|terhelés|átvezetés|fizetés\s+érkezett|card\s+payment|bank\s+card\s+payment|instant\s+transfer|transfer|payment(?:\s+(?:received|sent))?|money\s+(?:received|sent)|transaction|alert|notification)$/i;
+  /^(?:otp(?:\s+bank|\s+mobilbank|\s+smartbank)?|erste(?:\s+bank|\s+george)?|george|revolut|wise|azonnali\s+átutalás|átutalás|beérkező\s+(?:utalás|átutalás|fizetés|összeg)|kimenő\s+(?:utalás|átutalás|fizetés)|kártyás\s+(?:vásárlás|fizetés|tranzakció)|bankkártyás\s+(?:vásárlás|fizetés)|(?:sikeres\s+)?qvik(?:\s+(?:fizetési\s+)?(?:fizetés|vásárlás|utalás|átutalás|tranzakció|azonnali\s+(?:fizetés|átutalás|utalás)|kérel(?:em|met)(?:\s+kaptál)?))?|fizetési\s+kérel(?:em|met)(?:\s+kaptál)?|kérel(?:em|met)\s+(?:kaptál|érkezett)|request\s+to\s+pay|money\s+request|payment\s+request|sikeres\s+(?:online\s+|kártyás\s+|bankkártyás\s+|pos\s+|qvik\s+)?(?:vásárlás|fizetés|tranzakció|átutalás|utalás|jóváírás|terhelés)|(?:online|sikeres)\s+(?:vásárlás|fizetés|tranzakció)|vásárlás|fizetés|tranzakció|értesítés|jóváírás|terhelés|átvezetés|fizetés\s+érkezett|visszatérítés(?:\s+(?:érkezett|úton\s+van))?|card\s+(?:payment|purchase|transaction)|bank\s+card\s+payment|incoming\s+(?:transfer|payment|bank\s+transfer)|outgoing\s+(?:transfer|payment|bank\s+transfer)|internal\s+(?:transfer|bank\s+transfer)|instant\s+transfer|transfer(?:\s+(?:sent|received|completed|arrived|confirmed))?|refund(?:\s+(?:arrived|received|completed|processed|issued|credited|is\s+on\s+the\s+way))?|payment(?:\s+(?:sent|received|completed|confirmed|refunded|arrived))?|money\s+(?:sent|received|added|transferred)|(?:account\s+)?top[- ]?up(?:\s+(?:completed|successful|received))?|cashback(?:\s+(?:received|earned|arrived))?|transaction|alert|notification)$/i;
 
 function normalizeAmountNumber(rawNumStr) {
   if (!rawNumStr) return 0;
@@ -140,8 +145,12 @@ function stripUnexpandedMagicText(raw) {
   const cleaned = String(raw || '')
     .replace(/\{(?:not_|notification|trigger_|lv=)[^}]*\}/gi, ' ')
     .replace(/\[(?:not_|notification|trigger_|lv=)[^\]]*\]/gi, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[\u00A0\u202F\u2007\s]+/g, ' ')
     .trim();
+  const colonDup = /^(.{2,}?):\s*\1$/i.exec(cleaned);
+  if (colonDup) {
+    return colonDup[1].trim();
+  }
   const words = cleaned.split(' ');
   if (words.length >= 2 && words.length % 2 === 0) {
     const mid = words.length / 2;
@@ -188,9 +197,9 @@ function extractAmountAndCurrency(text) {
 function detectMoneyflowDirection(title, bodyWithoutBalance, sign) {
   const full = stripUiCtaTails(`${title} ${bodyWithoutBalance}`).toLowerCase();
 
-  // 1. Explicit internal vault / pocket transfer (only when moving to an own pocket/vault)
+  // 1. Explicit internal vault / pocket transfer (only when moving to/from an own pocket/vault)
   const hasInternalTransfer =
-    /(?:persely\s*számla|euro\s*vault|savings\s*pocket|\b(?:transferred|moved)\s+[^\n]*?\b(?:to|into)\s+[\w\s]*vault\b|\bátvezetés\b)/i.test(
+    /(?:persely\s*számla|euro\s*vault|savings\s*(?:pocket|vault)|\b(?:transferred|moved)\s+[^\n]*?\b(?:to|into|from|out\s+of)\s+[\w\s]*(?:vault|pocket|persely)\b|\b(?:from|out\s+of)\s+[\w\s]*(?:vault|pocket|persely)\b|\bátvezetés\b)/i.test(
       full
     ) && !/(?:vásárlás|purchase|\bspent\b|\bsent\s+you\b|\bpaid\s+you\b)/i.test(full);
   if (hasInternalTransfer) {
@@ -226,18 +235,21 @@ function detectMoneyflowDirection(title, bodyWithoutBalance, sign) {
 
 function cleanMerchantName(raw) {
   let s = stripUiCtaTails(raw)
+    .replace(/\s*\u26A0\uFE0F?.*$/u, '')
+    .replace(/\s+(?:it\s+will\s+arrive|you\s+can\s+expect|with\s+a\s+gif)\b.*$/i, '');
+  s = stripEmojisAndSymbols(s)
     .replace(/^(?:a(?:\(z\)|z)?|the)\s+/i, '')
-    .replace(/\s*(?:kereskedőnél|webshopjában|webshopban|webáruházában|webáruházban|üzletében|üzletben|boltjában|boltban|kártyával|kártya|egyenleg|balance|közlemény|reference).*$/i, '')
+    .replace(/\s*(?:kereskedőnél|webshopjában|webshopban|webáruházában|webáruházban|üzletében|üzletben|boltjában|boltban|részére|kártyával|kártya|egyenleg|balance|közlemény|reference).*$/i, '')
     .replace(/[.,;:\-]+$/, '')
     .trim();
   s = cleanRawMerchantString(s);
-  if (!s || isGenericCounterpartyName(s)) return '';
+  if (!s || /^(?:huf|ft|eur|usd|gbp|\d[\d\s.,]*)$/i.test(s) || isGenericCounterpartyName(s)) return '';
   return s.slice(0, 80);
 }
 
 function isGenericTitle(title, dbAccounts = []) {
-  const stripped = String(title || '')
-    .replace(/^[\s!?.:;,\-–—]+|[\s!?.:;,\-–—]+$/g, '')
+  const stripped = stripEmojisAndSymbols(title)
+    .replace(/^[\s!?.:;,\-–—*•]+|[\s!?.:;,\-–—*•]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!stripped) return true;
@@ -269,10 +281,10 @@ function extractMerchant(title, bodyWithoutBalance, txType, dbAccounts = []) {
     return cleanMerchantName(labeled[1]);
   }
 
-  // 2. Hungarian bank card purchase patterns:
-  //    e.g. "a METRO BISTRO ÉTTEREM kereskedőnél", "a(z) CRV*TESCO 12345 ONKISZ webshopjában"
+  // 2. Hungarian bank card / Qvik purchase patterns:
+  //    e.g. "a METRO BISTRO ÉTTEREM kereskedőnél", "a(z) CRV*TESCO 12345 ONKISZ webshopjában", "a(z) Metro Cafe részére"
   const huMerchantAt =
-    /(?:(?:sikeresen\s+)?(?:vásároltál|fizettél|költöttél|tranzakciót\s+hajtottál\s+végre)\s+)?\ba(?:\(z\)|z)?\s+(.+?)\s+(?:kereskedőnél|webshopjában|webshopban|webáruházában|webáruházban|üzletében|üzletben|boltjában|boltban|étteremben|alkalmazásban|helyszínén|helyen|elfogadóhelyen|terminálon)(?:[.!,;\s]|$)/i.exec(
+    /(?:(?:sikeresen\s+)?(?:vásároltál|fizettél|költöttél|tranzakciót\s+hajtottál\s+végre)\s+)?\ba(?:\(z\)|z)?\s+(.+?)\s+(?:kereskedőnél|webshopjában|webshopban|webáruházában|webáruházban|üzletében|üzletben|boltjában|boltban|étteremben|alkalmazásban|helyszínén|helyen|elfogadóhelyen|terminálon|részére)(?:[.!,;\s]|$)/i.exec(
       cleanBody
     );
   if (huMerchantAt) {
@@ -289,8 +301,10 @@ function extractMerchant(title, bodyWithoutBalance, txType, dbAccounts = []) {
   // 4. Revolut / bank notifications that put the sender/merchant directly in notification title
   //    e.g. app="Revolut", title="Anna Maria Kovacs", text="Sent you HUF1. Tap to say thank you 💰"
   if (cleanTitle && !isGenericTitle(cleanTitle, dbAccounts)) {
-    const cleanedTitleMerchant = cleanTitle
-      .replace(/^(?:payment\s+(?:from|to)|sent\s+to|received\s+from)\s+/i, '')
+    const cleanedTitleMerchant = stripEmojisAndSymbols(
+      cleanTitle.replace(/^(?:payment\s+(?:from|to)|sent\s+to|received\s+from)\s+/i, '')
+    )
+      .replace(/^[\s!?.:;,\-–—*•]+|[\s!?.:;,\-–—*•]+$/g, '')
       .trim();
     if (cleanedTitleMerchant.length >= 2 && !isGenericTitle(cleanedTitleMerchant, dbAccounts)) {
       return cleanedTitleMerchant.slice(0, 80);
@@ -304,7 +318,7 @@ function extractMerchant(title, bodyWithoutBalance, txType, dbAccounts = []) {
       return cleanMerchantName(fromMatch[1]);
     }
   } else if (txType === 'transfer') {
-    const toMatch = /\b(?:to|into)\s+([^\n.,;]+)/i.exec(cleanBody);
+    const toMatch = /\b(?:to|into|from|out\s+of)\s+([^\n.,;]+)/i.exec(cleanBody);
     if (toMatch && cleanMerchantName(toMatch[1])) {
       return cleanMerchantName(toMatch[1]);
     }
@@ -321,6 +335,7 @@ function extractMerchant(title, bodyWithoutBalance, txType, dbAccounts = []) {
     .map((p) => p.trim())
     .filter(Boolean);
   for (const part of parts) {
+    if (!stripEmojisAndSymbols(part)) continue;
     if (/(HUF|Ft|EUR|USD|GBP|€|\$|£)/i.test(part)) continue;
     if (/^(?:Közlemény|Reference|Időpont|Dátum|Card|Kártya)\b/i.test(part)) continue;
     if (/(?:értékben|sikeresen\s+vásároltál|sikeresen\s+fizettél)/i.test(part)) continue;
@@ -432,6 +447,9 @@ function parseBankNotification(payload = {}, dbAccounts = []) {
   if (FAILED_TX_ALERT_REGEX.test(combined)) {
     return { ignored: true, reason: 'Declined or failed transaction notification ignored.' };
   }
+  if (PENDING_OR_APPROVAL_ALERT_REGEX.test(combined)) {
+    return { ignored: true, reason: 'Pending approval or upcoming refund notification ignored.' };
+  }
   if (PROMO_OR_REMINDER_ALERT_REGEX.test(combined)) {
     return { ignored: true, reason: 'Promotional or upcoming payment reminder notification ignored.' };
   }
@@ -469,23 +487,33 @@ function parseBankNotification(payload = {}, dbAccounts = []) {
   const bankHint = detectBankHint(pkg, app, title, `${body} ${subText}`, dbAccounts);
   const txType = detectMoneyflowDirection(title, bodyWithoutBalance || textWithoutBalance, sign);
   const lower = textWithoutBalance.toLowerCase();
+  const transferDirection =
+    txType === 'transfer'
+      ? sign === '+' || /\b(?:from|out\s+of)\s+[\w\s]*(?:vault|pocket|persely)\b/i.test(lower)
+        ? 'to_main'
+        : 'from_main'
+      : null;
 
   // Reference / Közlemény
   const refMatch = /(?:Közlemény|Reference|Megjegyzés|Note)\s*:\s*([^\n,;]+)/i.exec(bodyWithoutBalance || textWithoutBalance);
   const refText = refMatch ? stripUiCtaTails(refMatch[1]).trim() : '';
 
   const merchant = extractMerchant(title, bodyWithoutBalance || textWithoutBalance, txType, dbAccounts);
-  const category = inferExpenseCategory(textWithoutBalance, merchant, txType);
+  let category = inferExpenseCategory(textWithoutBalance, merchant, txType);
+  if (txType === 'transfer' && transferDirection === 'to_main' && category === 'Savings / Set Aside') {
+    category = 'Pocket-to-Pocket Transfer';
+  }
 
   let destPocketHint = null;
   if (txType === 'transfer') {
+    const cleanForDest = stripEmojisAndSymbols(stripUiCtaTails(bodyWithoutBalance || textWithoutBalance));
+    const destM = /\b(?:to|into|from|out\s+of)\s+([^\n.,;]+)/i.exec(cleanForDest);
     if (lower.includes('persely')) destPocketHint = 'persely számla';
-    else if (lower.includes('euro vault') || lower.includes('vault')) destPocketHint = 'Euro Vault';
+    else if (destM && destM[1] && !/^(?:your\s+account|main)$/i.test(destM[1].trim())) {
+      destPocketHint = destM[1].trim();
+    } else if (lower.includes('euro vault')) destPocketHint = 'Euro Vault';
+    else if (lower.includes('vault')) destPocketHint = 'Vault';
     else if (lower.includes('savings pocket') || lower.includes('megtakarítás')) destPocketHint = 'Savings Pocket';
-    else {
-      const destM = /\b(?:to|into)\s+([^\n.,;]+)/i.exec(stripUiCtaTails(bodyWithoutBalance || textWithoutBalance));
-      if (destM) destPocketHint = destM[1].trim();
-    }
   }
 
   const cardMatch = /(?:Card|Kártya|\*{4}|•{4})\s*[:\-]?\s*(\d{4})\b/i.exec(combined);
@@ -508,6 +536,8 @@ function parseBankNotification(payload = {}, dbAccounts = []) {
     dest_bank_hint: txType === 'transfer' ? bankHint : null,
     dest_pocket_hint: destPocketHint,
     tx_type: txType,
+    amount_sign: sign,
+    transfer_direction: transferDirection,
     amount,
     currency,
     merchant,
@@ -521,8 +551,39 @@ function parseBankNotification(payload = {}, dbAccounts = []) {
   };
 }
 
+function matchOwnBankTopupAccount(rawMerchant, dbAccounts, excludeAccountId) {
+  const raw = String(rawMerchant || '').trim();
+  if (!raw) return null;
+  // Require strictly "<AccountName>" plus optional card mask / digits / top-up suffix (never arbitrary merchant names)
+  const stripped = raw
+    .replace(/\s+(?:top[- ]?up|feltöltés)$/i, '')
+    .replace(/[\s*•#\-_]*\d{2,6}[\s*•]*$/g, '')
+    .replace(/[*•]+$/g, '')
+    .trim();
+  if (!stripped) return null;
+  const normStripped = normalizeForMatch(stripped);
+  if (!normStripped || normStripped.length < 3) return null;
+  return (
+    (dbAccounts || []).find((acc) => {
+      if (acc.id === excludeAccountId) return false;
+      const normName = normalizeForMatch(acc.name || '');
+      const normSlug = normalizeForMatch(acc.slug || '');
+      return (normName.length >= 3 && normStripped === normName) || (normSlug.length >= 3 && normStripped === normSlug);
+    }) || null
+  );
+}
+
 function ingestBankNotification(db, resolveHintedPocketIdFn, payload = {}) {
   const dbAccounts = db.prepare('SELECT id, name, slug FROM accounts WHERE is_archived = 0').all();
+  const dbPockets = db
+    .prepare(
+      `SELECT p.id, p.account_id, p.name, p.is_default, a.name AS account_name, a.slug AS account_slug
+       FROM pockets p
+       JOIN accounts a ON a.id = p.account_id
+       WHERE a.is_archived = 0 AND p.is_archived = 0`
+    )
+    .all();
+
   const parsed = parseBankNotification(payload, dbAccounts);
   if (parsed.ignored || !parsed.amount || parsed.amount <= 0) {
     return {
@@ -533,9 +594,126 @@ function ingestBankNotification(db, resolveHintedPocketIdFn, payload = {}) {
     };
   }
 
+  // Always resolve the notifying bank account's main pocket first
+  let mainPocketId = parsed.bank_hint ? resolveBankMainPocketId(db, parsed.bank_hint) : null;
+  if (!mainPocketId && payload.pocketId) {
+    mainPocketId = Number(payload.pocketId);
+  }
+  if (!mainPocketId) {
+    const fallbackPocket =
+      db.prepare('SELECT id FROM pockets WHERE is_archived = 0 ORDER BY is_default DESC, id ASC LIMIT 1').get() ||
+      db.prepare('SELECT id FROM pockets ORDER BY is_default DESC, id ASC LIMIT 1').get();
+    mainPocketId = fallbackPocket?.id;
+  }
+  if (!mainPocketId) {
+    throw new Error('No pocket available to log notification transaction.');
+  }
+
+  const mainPocketRow = dbPockets.find((p) => p.id === mainPocketId) || null;
+  const rawCombined = [
+    payload.app,
+    payload.appName,
+    payload.title,
+    payload.bigText,
+    payload.text,
+    payload.message,
+    payload.body,
+    payload.rawText,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const isCardOrShopPurchase = /(?:vásárlás|vásároltál|kereskedőnél|webshop|card\s+payment|purchase|\bpaid\s+[^\n]*\bat\b)/i.test(
+    rawCombined
+  );
+  const refSuffix = parsed.ref_text ? ` (${parsed.ref_text})` : '';
+
+  let txType = parsed.tx_type;
+  let sourcePocketId = mainPocketId;
+  let destPocketId = null;
+
+  if (txType === 'transfer') {
+    const otherPocketId = resolveHintedPocketIdFn(
+      db,
+      parsed.dest_bank_hint || parsed.bank_hint,
+      parsed.dest_pocket_hint,
+      null,
+      mainPocketId
+    );
+    if (otherPocketId && otherPocketId !== mainPocketId) {
+      if (parsed.transfer_direction === 'to_main') {
+        sourcePocketId = otherPocketId;
+        destPocketId = mainPocketId;
+      } else {
+        sourcePocketId = mainPocketId;
+        destPocketId = otherPocketId;
+      }
+      const srcRow = dbPockets.find((p) => p.id === sourcePocketId);
+      const dstRow = dbPockets.find((p) => p.id === destPocketId);
+      parsed.merchant = '';
+      if (srcRow && dstRow) {
+        parsed.dest_bank_hint = dstRow.account_name;
+        parsed.dest_pocket_hint = dstRow.name;
+        parsed.auto_note = `${parsed.bank_hint || srcRow.account_name || 'Bank'}: internal transfer from ${srcRow.name} to ${dstRow.name}${refSuffix}`;
+      }
+    } else {
+      txType = parsed.amount_sign === '+' ? 'income' : 'expense';
+      parsed.tx_type = txType;
+      destPocketId = null;
+    }
+  } else if ((txType === 'expense' || txType === 'income') && mainPocketRow && parsed.merchant && !isCardOrShopPurchase) {
+    // Dynamic same-bank own-pocket matching (e.g. instant transfer to/from an existing custom pocket)
+    const normMerchant = normalizeForMatch(parsed.merchant).replace(/\s+/g, ' ').trim();
+    const matchedOwnPocket = dbPockets.find((p) => {
+      if (p.account_id !== mainPocketRow.account_id || p.id === mainPocketId) return false;
+      const normPocket = normalizeForMatch(p.name).replace(/\s+/g, ' ').trim();
+      if (!normPocket || normPocket.length < 3) return false;
+      if (normMerchant === normPocket) return true;
+      if (normPocket.length >= 6 && (normMerchant === `${normPocket} szamla` || normPocket === `${normMerchant} szamla`)) {
+        return true;
+      }
+      return false;
+    });
+    if (matchedOwnPocket) {
+      const incoming = txType === 'income' || parsed.amount_sign === '+';
+      txType = 'transfer';
+      parsed.tx_type = 'transfer';
+      parsed.category = 'Pocket-to-Pocket Transfer';
+      parsed.merchant = '';
+      sourcePocketId = incoming ? matchedOwnPocket.id : mainPocketId;
+      destPocketId = incoming ? mainPocketId : matchedOwnPocket.id;
+      const srcRow = dbPockets.find((p) => p.id === sourcePocketId);
+      const dstRow = dbPockets.find((p) => p.id === destPocketId);
+      if (srcRow && dstRow) {
+        parsed.dest_bank_hint = dstRow.account_name;
+        parsed.dest_pocket_hint = dstRow.name;
+        parsed.auto_note = `${parsed.bank_hint || mainPocketRow.account_name || 'Bank'}: transfer from ${srcRow.name} to ${dstRow.name}${refSuffix}`;
+      }
+    }
+  }
+
+  // Dynamic cross-bank card top-up detection (e.g. OTP online purchase at Revolut**9999*)
+  if (txType === 'expense' && mainPocketRow && parsed.merchant) {
+    const otherBankAcc = matchOwnBankTopupAccount(parsed.merchant, dbAccounts, mainPocketRow.account_id);
+    if (otherBankAcc) {
+      const otherMainPocketId = resolveBankMainPocketId(db, otherBankAcc.name);
+      if (otherMainPocketId && otherMainPocketId !== mainPocketId) {
+        txType = 'transfer';
+        parsed.tx_type = 'transfer';
+        parsed.category = 'Bank-to-Bank Transfer';
+        parsed.merchant = '';
+        sourcePocketId = mainPocketId;
+        destPocketId = otherMainPocketId;
+        parsed.dest_bank_hint = otherBankAcc.name;
+        const dstRow = dbPockets.find((p) => p.id === otherMainPocketId);
+        parsed.dest_pocket_hint = dstRow ? dstRow.name : null;
+        parsed.auto_note = `${mainPocketRow.account_name} -> ${otherBankAcc.name} (top-up)${refSuffix}`;
+      }
+    }
+  }
+
   // Pair extracted origin/destination with the closest existing counterparty (and its default category)
-  if ((parsed.tx_type === 'income' || parsed.tx_type === 'expense') && parsed.merchant) {
-    const dir = parsed.tx_type === 'income' ? 'in' : 'out';
+  if ((txType === 'income' || txType === 'expense') && parsed.merchant) {
+    const dir = txType === 'income' ? 'in' : 'out';
     const matched = findBestMatchingCounterparty(db, parsed.merchant, dir);
     if (matched && matched.counterparty) {
       parsed.raw_merchant = parsed.merchant;
@@ -543,7 +721,7 @@ function ingestBankNotification(db, resolveHintedPocketIdFn, payload = {}) {
       parsed.matched_counterparty_id = matched.counterparty.id;
       parsed.match_score = matched.score;
       if (matched.counterparty.default_category_id) {
-        const expectedCatType = parsed.tx_type === 'income' ? 'income' : 'expense';
+        const expectedCatType = txType === 'income' ? 'income' : 'expense';
         const catRow = db
           .prepare('SELECT id, name, type FROM categories WHERE id = ?')
           .get(matched.counterparty.default_category_id);
@@ -554,7 +732,7 @@ function ingestBankNotification(db, resolveHintedPocketIdFn, payload = {}) {
       parsed.auto_note = buildNotificationAutoNote({
         bankHint: parsed.bank_hint,
         title: stripUnexpandedMagicText(payload.title || ''),
-        txType: parsed.tx_type,
+        txType,
         merchant: parsed.merchant,
         destPocketHint: parsed.dest_pocket_hint,
         refText: parsed.ref_text || '',
@@ -565,16 +743,31 @@ function ingestBankNotification(db, resolveHintedPocketIdFn, payload = {}) {
 
   // De-duplicate rapid double-notifications from Android summary + detail notifications (last 90s)
   const cutoffIso = new Date(Date.now() - 90 * 1000).toISOString();
-  const duplicate = db
-    .prepare(
-      `SELECT id FROM transactions
-       WHERE auto_source = 'notification'
-         AND amount = ?
-         AND LOWER(merchant) = LOWER(?)
-         AND created_at >= ?
-       ORDER BY id DESC LIMIT 1`
-    )
-    .get(parsed.amount, parsed.merchant, cutoffIso);
+  const duplicate =
+    txType === 'transfer'
+      ? db
+          .prepare(
+            `SELECT id FROM transactions
+             WHERE auto_source = 'notification'
+               AND type = 'transfer'
+               AND amount = ?
+               AND pocket_id = ?
+               AND dest_pocket_id = ?
+               AND created_at >= ?
+             ORDER BY id DESC LIMIT 1`
+          )
+          .get(parsed.amount, sourcePocketId, destPocketId, cutoffIso)
+      : db
+          .prepare(
+            `SELECT id FROM transactions
+             WHERE auto_source = 'notification'
+               AND type = ?
+               AND amount = ?
+               AND LOWER(merchant) = LOWER(?)
+               AND created_at >= ?
+             ORDER BY id DESC LIMIT 1`
+          )
+          .get(txType, parsed.amount, parsed.merchant, cutoffIso);
 
   if (duplicate) {
     return {
@@ -587,46 +780,15 @@ function ingestBankNotification(db, resolveHintedPocketIdFn, payload = {}) {
     };
   }
 
-  // Always assign to the detected bank account's main pocket
-  let targetPocketId = parsed.bank_hint ? resolveBankMainPocketId(db, parsed.bank_hint) : null;
-  if (!targetPocketId && payload.pocketId) {
-    targetPocketId = Number(payload.pocketId);
-  }
-  if (!targetPocketId) {
-    const fallbackPocket =
-      db.prepare('SELECT id FROM pockets WHERE is_archived = 0 ORDER BY is_default DESC, id ASC LIMIT 1').get() ||
-      db.prepare('SELECT id FROM pockets ORDER BY is_default DESC, id ASC LIMIT 1').get();
-    targetPocketId = fallbackPocket?.id;
-  }
-  if (!targetPocketId) {
-    throw new Error('No pocket available to log notification transaction.');
-  }
-
-  let txType = parsed.tx_type;
-  let destPocketId = null;
-  if (txType === 'transfer') {
-    destPocketId = resolveHintedPocketIdFn(
-      db,
-      parsed.dest_bank_hint || parsed.bank_hint,
-      parsed.dest_pocket_hint,
-      null,
-      targetPocketId
-    );
-    if (!destPocketId || destPocketId === targetPocketId) {
-      txType = 'expense';
-      destPocketId = null;
-    }
-  }
-
   const transaction = createTransaction(db, {
     date: parsed.date,
     type: txType,
     amount: parsed.amount,
     currency: parsed.currency,
-    pocketId: targetPocketId,
+    pocketId: sourcePocketId,
     destPocketId,
     categoryName: parsed.category,
-    merchant: parsed.merchant,
+    merchant: txType === 'transfer' ? '' : parsed.merchant,
     note: '',
     receiptAutoNote: parsed.auto_note,
     noteSource: 'auto',

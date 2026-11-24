@@ -145,6 +145,16 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_tx_type ON transactions(type);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_counterparties_dir ON counterparties(direction, use_count DESC);
+
+    CREATE TABLE IF NOT EXISTS deleted_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      original_tx_id INTEGER NOT NULL,
+      tx_json TEXT NOT NULL,
+      receipt_path TEXT,
+      deleted_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deleted_tx_expires ON deleted_transactions(expires_at);
   `);
 
   // Safe migration if upgrading an existing SQLite DB
@@ -238,6 +248,7 @@ function seedDefaults(db) {
     ['fx_rates', JSON.stringify(DEFAULT_FX_RATES)],
     ['notification_webhook_token', crypto.randomBytes(16).toString('hex')],
     ['session_timeout_minutes', '10'],
+    ['trash_retention_minutes', '43200'],
   ];
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -267,15 +278,12 @@ function seedDefaults(db) {
   const seedCategories = [
     // Income
     ['Work / Salary', 'income', 'briefcase', '#10b981', 'Work income credited{merchant} ({account} · {pocket})'],
-    ['Scholarship', 'income', 'graduation-cap', '#06b6d4', 'Scholarship payment received{merchant} ({account} · {pocket})'],
     ['Family & Gifts', 'income', 'gift', '#8b5cf6', 'Family support / gift received{merchant} ({account} · {pocket})'],
     ['Other Income', 'income', 'plus-circle', '#22c55e', 'Income received{merchant} ({account} · {pocket})'],
     // Expense
     ['Shopping', 'expense', 'shopping-bag', '#f59e0b', 'General shopping{merchant} ({account} · {pocket})'],
-    ['Tech & Electronics', 'expense', 'cpu', '#6366f1', 'Tech & electronics purchase{merchant} ({account} · {pocket})'],
-    ['Fuel & Transport', 'expense', 'fuel', '#ef4444', 'Fueling up / transport expense{merchant} ({account} · {pocket})'],
-    ['University & Dorm', 'expense', 'graduation-cap', '#0ea5e9', 'University / dorm expense{merchant} ({account} · {pocket})'],
     ['Food & Dining', 'expense', 'utensils', '#f97316', 'Food & dining{merchant} ({account} · {pocket})'],
+    ['Fuel & Transport', 'expense', 'fuel', '#ef4444', 'Fueling up / transport expense{merchant} ({account} · {pocket})'],
     ['Bills & Subscriptions', 'expense', 'receipt', '#64748b', 'Bills & subscription payment{merchant} ({account} · {pocket})'],
     ['Entertainment', 'expense', 'film', '#ec4899', 'Entertainment & leisure{merchant} ({account} · {pocket})'],
     ['Health & Fitness', 'expense', 'heart-pulse', '#14b8a6', 'Health & fitness expense{merchant} ({account} · {pocket})'],
@@ -284,7 +292,6 @@ function seedDefaults(db) {
     ['Bank-to-Bank Transfer', 'transfer', 'arrow-left-right', '#3b82f6', 'Bank transfer from {account} ({pocket}) to {destAccount} ({destPocket})'],
     ['Pocket-to-Pocket Transfer', 'transfer', 'repeat', '#0ea5e9', 'Pocket transfer from {account} ({pocket}) to {destAccount} ({destPocket})'],
     ['Savings / Set Aside', 'transfer', 'piggy-bank', '#6366f1', 'Set aside from {account} ({pocket}) into {destAccount} ({destPocket})'],
-    ['Pocket Reimbursement', 'transfer', 'rotate-ccw', '#14b8a6', 'Reimbursed {destAccount} ({destPocket}) from {account} ({pocket})'],
     ['Internal Transfer', 'transfer', 'arrow-left-right', '#38bdf8', 'Transfer from {account} ({pocket}) to {destAccount} ({destPocket})'],
   ];
 

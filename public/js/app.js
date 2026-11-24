@@ -553,17 +553,47 @@
     };
   }
 
-  function toast(message, kind = 'ok') {
+  function toast(message, kind = 'ok', opts = {}) {
     const container = syncToastHost();
     if (!container) return;
     const el = document.createElement('div');
-    el.className = `toast ${kind}`;
+    el.className = `toast ${kind}${opts?.actionLabel ? ' toast-has-action' : ''}`;
+
+    if (opts?.actionLabel && typeof opts.onAction === 'function') {
+      const msgSpan = document.createElement('span');
+      msgSpan.textContent = message;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action-btn';
+      btn.textContent = opts.actionLabel;
+      el.appendChild(msgSpan);
+      el.appendChild(btn);
+      let timer = null;
+      const closeToast = () => {
+        if (timer) clearTimeout(timer);
+        el.remove();
+        syncToastHost();
+      };
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        closeToast();
+        try {
+          await opts.onAction();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      });
+      container.appendChild(el);
+      timer = setTimeout(closeToast, Number(opts.durationMs) || 8500);
+      return;
+    }
+
     el.textContent = message;
     container.appendChild(el);
     setTimeout(() => {
       el.remove();
       syncToastHost();
-    }, 4200);
+    }, Number(opts?.durationMs) || 4200);
   }
 
   async function api(url, opts = {}) {
@@ -716,9 +746,30 @@
     state.sessionTimerInterval = setInterval(tickSessionCountdown, 1000);
   }
 
+  function renderAppVersion(info) {
+    if (!info) return;
+    state.appVersion = info;
+    const label = info.label || (info.version ? `v${info.version}` : '');
+    const details = [
+      info.version ? `Version: v${info.version}` : '',
+      info.buildNumber ? `Build: #${info.buildNumber}` : '',
+      info.commitSha ? `Commit: ${info.commitSha}${info.isDirty ? ' (uncommitted dev changes)' : ''}` : '',
+      info.buildTime ? `Built: ${info.buildTime}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+    for (const id of ['auth-app-version', 'settings-app-version']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.textContent = label;
+      if (details) el.title = details;
+    }
+  }
+
   function showAuthScreen(initialized) {
     stopSessionCountdown();
     state.user = null;
+    if (state.appVersion) renderAppVersion(state.appVersion);
     document.getElementById('app-view').classList.add('hidden');
     document.getElementById('auth-view').classList.remove('hidden');
     document.getElementById('setup-form').classList.toggle('hidden', initialized);
@@ -1766,6 +1817,13 @@
     syncFilterChipsAndResetUI(d);
     syncLedgerSortHeaders();
 
+    const trashBtn = document.getElementById('btn-open-trash');
+    if (trashBtn) {
+      const delCount = Number(d.deletedTxCount || 0);
+      trashBtn.classList.toggle('hidden', delCount === 0);
+      trashBtn.textContent = t('btnOpenTrash', { count: delCount });
+    }
+
     // Ledger Table & Pagination
     renderLedgerTable(d.transactions, d.totalMatchingTransactions);
     renderLedgerPagination(d);
@@ -2395,7 +2453,16 @@
         state.lastClickedTxId = null;
       }
       await refreshDashboard();
-      toast(t('toastBulkDone', { count: res.affectedCount ?? ids.length }), 'ok');
+      if (action === 'delete' && Array.isArray(res.trashIds) && res.trashIds.length > 0) {
+        const trashIds = res.trashIds;
+        toast(t('toastBulkDone', { count: res.affectedCount ?? ids.length }), 'ok', {
+          actionLabel: t('btnUndo'),
+          durationMs: 8500,
+          onAction: () => restoreTrashIds(trashIds),
+        });
+      } else {
+        toast(t('toastBulkDone', { count: res.affectedCount ?? ids.length }), 'ok');
+      }
     } catch (err) {
       toast(err.message, 'err');
     }
@@ -2636,9 +2703,17 @@
         const id = Number(btn.dataset.delTx);
         if (!window.confirm(t('confirmDeleteTx'))) return;
         try {
-          await api(`/api/transactions/${id}`, { method: 'DELETE' });
+          const res = await api(`/api/transactions/${id}`, { method: 'DELETE' });
           await refreshDashboard();
-          toast(t('toastTxDeleted'), 'ok');
+          if (res.trashId) {
+            toast(t('toastTxDeleted'), 'ok', {
+              actionLabel: t('btnUndo'),
+              durationMs: 8500,
+              onAction: () => restoreTrashIds([res.trashId]),
+            });
+          } else {
+            toast(t('toastTxDeleted'), 'ok');
+          }
         } catch (err) {
           toast(err.message, 'err');
         }
@@ -4818,6 +4893,7 @@
     populateNotifTestAccountSelect();
     try {
       const s = await api('/api/settings');
+      if (s.appVersion) renderAppVersion(s.appVersion);
       document.getElementById('set-gemini-status').textContent = s.hasGeminiKey
         ? t('geminiStatusSet', { preview: s.geminiKeyPreview })
         : t('geminiStatusUnset');
@@ -4834,6 +4910,19 @@
       if (timeoutInput) timeoutInput.value = String(s.sessionTimeoutMinutes || state.sessionTimeoutMinutes || 10);
       const timeoutMsg = document.getElementById('set-timeout-msg');
       if (timeoutMsg) timeoutMsg.textContent = '';
+      const trashSel = document.getElementById('set-trash-retention');
+      if (trashSel) {
+        const minsVal = String(s.trashRetentionMinutes ?? 43200);
+        if (!Array.from(trashSel.options).some((o) => o.value === minsVal)) {
+          const opt = document.createElement('option');
+          opt.value = minsVal;
+          opt.textContent = formatTrashWindowLabel(Number(minsVal));
+          trashSel.appendChild(opt);
+        }
+        trashSel.value = minsVal;
+      }
+      const trashMsg = document.getElementById('set-trash-retention-msg');
+      if (trashMsg) trashMsg.textContent = '';
       const webhookInput = document.getElementById('set-webhook-url');
       if (webhookInput && s.webhookToken) {
         const wUrl = new URL('api/notifications/webhook', window.location.href);
@@ -7037,6 +7126,180 @@
       }
     });
 
+    function formatTrashWindowLabel(mins) {
+      const n = Number(mins);
+      if (n <= 0) return t('trashOptOff');
+      if (n === 15) return t('trashOpt15m');
+      if (n === 60) return t('trashOpt1h');
+      if (n === 1440) return t('trashOpt24h');
+      if (n === 10080) return t('trashOpt7d');
+      if (n === 43200) return t('trashOpt30d');
+      if (n === 129600) return t('trashOpt90d');
+      if (n >= 1440 && n % 1440 === 0) return `${n / 1440}d`;
+      if (n >= 60 && n % 60 === 0) return `${n / 60}h`;
+      return `${n}m`;
+    }
+
+    function formatTrashRemaining(remainingMs) {
+      const mins = Math.max(1, Math.ceil((Number(remainingMs) || 0) / 60000));
+      if (mins >= 1440) return `${Math.ceil(mins / 1440)}d`;
+      if (mins >= 60) return `${Math.ceil(mins / 60)}h`;
+      return `${mins}m`;
+    }
+
+    async function restoreTrashIds(ids, { all = false } = {}) {
+      const res = await api('/api/transactions/trash/restore', {
+        method: 'POST',
+        body: all ? { all: true } : { ids },
+      });
+      await refreshDashboard();
+      if (document.getElementById('trash-modal')?.open) {
+        const trashData = await api('/api/transactions/trash');
+        renderTrashModal(trashData);
+      }
+      toast(t('toastTxRestored', { count: res.restoredCount || 1 }), 'ok');
+    }
+
+    function renderTrashModal(data) {
+      const items = data?.items || [];
+      const retentionMinutes = Number(data?.retentionMinutes ?? 43200);
+      const infoEl = document.getElementById('trash-retention-info');
+      const listEl = document.getElementById('trash-list');
+      const emptyEl = document.getElementById('trash-empty');
+      const restoreAllBtn = document.getElementById('btn-trash-restore-all');
+      const emptyBtn = document.getElementById('btn-trash-empty');
+
+      if (infoEl) {
+        infoEl.textContent =
+          retentionMinutes > 0
+            ? t('trashRetentionInfo', { window: formatTrashWindowLabel(retentionMinutes) })
+            : t('trashDisabledInfo');
+      }
+      if (restoreAllBtn) restoreAllBtn.classList.toggle('hidden', items.length === 0);
+      if (emptyBtn) emptyBtn.classList.toggle('hidden', items.length === 0);
+      if (emptyEl) emptyEl.classList.toggle('hidden', items.length > 0);
+      if (!listEl) return;
+
+      listEl.innerHTML = items
+        .map((item) => {
+          const signedAmt =
+            item.type === 'income'
+              ? formatMoney(item.amount, item.currency, true)
+              : item.type === 'expense'
+              ? formatMoney(-item.amount, item.currency)
+              : item.type === 'transfer'
+              ? `⇄ ${formatMoney(item.amount, item.currency)}`
+              : `= ${formatMoney(item.amount, item.currency)}`;
+          const amtClass = item.type === 'income' ? 'positive' : item.type === 'expense' ? 'negative' : '';
+          const route =
+            item.type === 'transfer' && item.destPocketName
+              ? `${esc(item.accountName)} · ${esc(item.pocketName)} → ${esc(item.destAccountName)} · ${esc(item.destPocketName)}`
+              : `${esc(item.accountName)} · ${esc(item.pocketName)}${item.merchant ? ` · ${esc(item.merchant)}` : ''}`;
+          const receiptTag = item.receiptPath ? ' 🧾' : '';
+          return `
+            <div class="trash-item">
+              <div class="trash-item-main">
+                <div class="trash-item-top">
+                  <span class="${amtClass}">${esc(signedAmt)}</span>
+                  <span>${esc(tCat(item.categoryName))}${receiptTag}</span>
+                  <span class="trash-expiry-pill">${esc(t('trashExpiresIn', { time: formatTrashRemaining(item.remainingMs) }))}</span>
+                </div>
+                <div class="trash-item-meta">
+                  <span>${esc(String(item.date || '').replace('T', ' '))}</span>
+                  <span>${route}</span>
+                  ${item.note ? `<span>“${esc(item.note.slice(0, 80))}${item.note.length > 80 ? '…' : ''}”</span>` : ''}
+                </div>
+              </div>
+              <div class="trash-item-actions">
+                <button type="button" class="btn btn-secondary small" data-trash-restore="${item.id}">${esc(t('btnTrashRestore'))}</button>
+                <button type="button" class="btn btn-danger small" data-trash-purge="${item.id}">${esc(t('btnTrashDeleteForever'))}</button>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      listEl.querySelectorAll('[data-trash-restore]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            await restoreTrashIds([Number(btn.dataset.trashRestore)]);
+          } catch (err) {
+            btn.disabled = false;
+            toast(err.message, 'err');
+          }
+        });
+      });
+
+      listEl.querySelectorAll('[data-trash-purge]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            const res = await api(`/api/transactions/trash/${Number(btn.dataset.trashPurge)}`, { method: 'DELETE' });
+            const fresh = await api('/api/transactions/trash');
+            renderTrashModal(fresh);
+            await refreshDashboard();
+            toast(t('toastTrashPurged', { count: res.purgedCount || 1 }), 'ok');
+          } catch (err) {
+            btn.disabled = false;
+            toast(err.message, 'err');
+          }
+        });
+      });
+    }
+
+    async function openTrashModal() {
+      try {
+        const data = await api('/api/transactions/trash');
+        renderTrashModal(data);
+        const modal = document.getElementById('trash-modal');
+        if (modal && !modal.open) modal.showModal();
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    }
+
+    document.getElementById('btn-open-trash')?.addEventListener('click', openTrashModal);
+    document.getElementById('btn-settings-open-trash')?.addEventListener('click', openTrashModal);
+    document.getElementById('btn-trash-restore-all')?.addEventListener('click', async () => {
+      try {
+        await restoreTrashIds([], { all: true });
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    });
+    document.getElementById('btn-trash-empty')?.addEventListener('click', async () => {
+      if (!window.confirm(t('confirmTrashEmpty'))) return;
+      try {
+        const res = await api('/api/transactions/trash?all=1', { method: 'DELETE' });
+        const fresh = await api('/api/transactions/trash');
+        renderTrashModal(fresh);
+        await refreshDashboard();
+        toast(t('toastTrashPurged', { count: res.purgedCount || 0 }), 'ok');
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    });
+    document.getElementById('btn-save-trash-retention')?.addEventListener('click', async () => {
+      const sel = document.getElementById('set-trash-retention');
+      const msgEl = document.getElementById('set-trash-retention-msg');
+      const mins = Number(sel?.value ?? 43200);
+      try {
+        const res = await api('/api/settings', {
+          method: 'PUT',
+          body: { trashRetentionMinutes: mins },
+        });
+        const applied = Number(res.trashRetentionMinutes ?? mins);
+        const msg = t('toastTrashRetentionSaved', { window: formatTrashWindowLabel(applied) });
+        if (msgEl) msgEl.textContent = msg;
+        await refreshDashboard();
+        toast(msg, 'ok');
+      } catch (err) {
+        if (msgEl) msgEl.textContent = err.message;
+        toast(err.message, 'err');
+      }
+    });
+
     const timerBadge = document.getElementById('session-timer-badge');
     if (timerBadge) {
       timerBadge.addEventListener('click', () => {
@@ -7368,6 +7631,7 @@
     // Initial Auth check
     try {
       const status = await api('/api/auth/status');
+      if (status.appVersion) renderAppVersion(status.appVersion);
       if (status.authenticated && status.user) {
         showAppScreen(status.user, status.sessionTimeoutMinutes);
         await refreshDashboard();

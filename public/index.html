@@ -54,7 +54,7 @@
         </p>
         <label class="field">
           <span data-i18n="usernameLabel">Username</span>
-          <input id="setup-username" name="username" type="text" autocomplete="username" required minlength="2" data-i18n-placeholder="phUsername" placeholder="e.g. alex" />
+          <input id="setup-username" name="username" type="text" autocomplete="username" required minlength="2" data-i18n-placeholder="phUsername" placeholder="e.g. demo_user" />
         </label>
         <label class="field">
           <span data-i18n="passwordLabel">Password</span>
@@ -83,6 +83,9 @@
         <p id="login-error" class="form-error hidden"></p>
         <button type="submit" class="btn btn-primary btn-full" data-i18n="loginBtn">Sign In</button>
       </form>
+      <div class="auth-version-footer">
+        <span id="auth-app-version" class="app-version-badge" aria-label="App version"></span>
+      </div>
     </section>
   </main>
 
@@ -331,6 +334,7 @@
               <p class="muted small" data-i18n="ledgerDesc">Every entry records both the pocket balance and bank account total immediately after it.</p>
             </div>
             <div class="section-tools">
+              <button type="button" id="btn-open-trash" class="btn btn-ghost small hidden" data-i18n-title="titleOpenTrash" title="View recently deleted transactions">🗑️ Trash (0)</button>
               <button type="button" id="btn-auto-size-cols" class="btn btn-ghost small hidden" data-i18n="btnAutoSizeCols" data-i18n-title="titleAutoSizeCols" title="Set all ledger columns to auto size">⤢ Auto Size Columns</button>
               <div class="ledger-count muted small" id="ledger-count">0 transactions</div>
             </div>
@@ -779,7 +783,7 @@
               </label>
               <label class="field">
                 <span data-i18n="storeAddressLabel">Store Address (optional)</span>
-                <input id="rc-address" type="text" data-i18n-placeholder="phStoreAddress" placeholder="e.g. 123 Main Street, Sample City" />
+                <input id="rc-address" type="text" data-i18n-placeholder="phStoreAddress" placeholder="e.g. 123 Mock Street, Mock City" />
               </label>
               <div id="rc-attach-merge-box" class="rc-attach-merge-box hidden">
                 <div class="rc-merge-header">
@@ -1104,7 +1108,7 @@
         <input type="hidden" id="bm-account-id" />
         <label class="field">
           <span data-i18n="bankName">Bank Name</span>
-          <input id="bm-name" type="text" required data-i18n-placeholder="phBankName" placeholder="e.g. Wise, K&amp;H, Raiffeisen" />
+          <input id="bm-name" type="text" required data-i18n-placeholder="phBankName" placeholder="e.g. Main Bank, Savings Bank" />
         </label>
         <div class="form-grid-2">
           <label class="field">
@@ -1300,6 +1304,25 @@
                 </div>
               </label>
               <p id="set-timeout-msg" class="small muted" style="margin:0;"></p>
+            </div>
+            <div class="trash-retention-box" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">
+              <label class="field" style="margin-bottom:6px;">
+                <span data-i18n="trashRetentionLabel">Deleted Transaction Recovery Window</span>
+                <div class="input-with-addon">
+                  <select id="set-trash-retention">
+                    <option value="0" data-i18n="trashOptOff">Disabled (Delete immediately)</option>
+                    <option value="15" data-i18n="trashOpt15m">15 minutes</option>
+                    <option value="60" data-i18n="trashOpt1h">1 hour</option>
+                    <option value="1440" data-i18n="trashOpt24h">24 hours</option>
+                    <option value="10080" data-i18n="trashOpt7d">7 days</option>
+                    <option value="43200" data-i18n="trashOpt30d">30 days</option>
+                    <option value="129600" data-i18n="trashOpt90d">90 days</option>
+                  </select>
+                  <button type="button" id="btn-save-trash-retention" class="btn btn-secondary small" data-i18n="btnSaveTrashRetention">Save Window</button>
+                  <button type="button" id="btn-settings-open-trash" class="btn btn-ghost small" data-i18n="btnSettingsOpenTrash">🗑️ View Trash</button>
+                </div>
+              </label>
+              <p id="set-trash-retention-msg" class="small muted" style="margin:0;"></p>
             </div>
           </form>
         </div>
@@ -1587,6 +1610,7 @@
         </div>
       </div>
       <div class="modal-footer">
+        <span id="settings-app-version" class="app-version-badge" style="margin-right:auto;" aria-label="App version"></span>
         <button type="button" class="btn btn-primary" data-close="settings-modal" data-i18n="btnDone">✅ Done</button>
       </div>
     </div>
@@ -1617,6 +1641,33 @@
       <div class="modal-footer">
         <button type="button" id="btn-widgets-reset-default" class="btn btn-ghost" style="margin-right:auto;" data-i18n="btnResetDefault">🔄 Reset Default</button>
         <button type="button" class="btn btn-primary" data-close="widgets-modal" data-i18n="btnDone">✅ Done</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: RECENTLY DELETED / TRASH -->
+  <dialog id="trash-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 data-i18n="trashModalTitle">🗑️ Recently Deleted Transactions</h3>
+          <p class="modal-subtitle muted small" data-i18n="trashModalSub">Restore accidentally deleted entries before their recovery window expires.</p>
+        </div>
+        <button type="button" class="btn btn-icon" data-close="trash-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="trash-retention-info" class="muted small" style="margin-bottom:10px;"></div>
+        <div id="trash-list" class="trash-list"></div>
+        <div id="trash-empty" class="empty-state hidden">
+          <p data-i18n="trashEmptyMsg">No recently deleted transactions.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <button type="button" id="btn-trash-restore-all" class="btn btn-primary small hidden" data-i18n="btnTrashRestoreAll">↩ Restore All</button>
+          <button type="button" id="btn-trash-empty" class="btn btn-danger small hidden" data-i18n="btnTrashEmpty">Empty Trash</button>
+        </div>
+        <button type="button" class="btn btn-primary" data-close="trash-modal" data-i18n="btnClose">Close</button>
       </div>
     </div>
   </dialog>

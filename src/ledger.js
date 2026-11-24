@@ -796,12 +796,267 @@ function updateTransaction(db, id, patch) {
   return getTransactionById(db, existing.id);
 }
 
-function deleteTransaction(db, id) {
-  const existing = db.prepare('SELECT id FROM transactions WHERE id = ?').get(Number(id));
-  if (!existing) throw new Error('Transaction not found.');
+function sanitizeTrashRetentionMinutes(val) {
+  if (val === '' || val === null || val === undefined) return 43200;
+  const n = Number(val);
+  if (!Number.isFinite(n)) return 43200;
+  return Math.max(0, Math.min(525600, Math.round(n)));
+}
+
+function getTrashRetentionMinutes(db) {
+  return sanitizeTrashRetentionMinutes(getSetting(db, 'trash_retention_minutes', '43200'));
+}
+
+function cleanupUnreferencedReceipt(db, receiptPath, receiptsDir) {
+  if (!receiptPath || !receiptsDir) return;
+  const stillInTx = db
+    .prepare('SELECT COUNT(*) AS cnt FROM transactions WHERE receipt_path = ?')
+    .get(receiptPath).cnt;
+  const stillInTrash = db
+    .prepare('SELECT COUNT(*) AS cnt FROM deleted_transactions WHERE receipt_path = ?')
+    .get(receiptPath).cnt;
+  if (stillInTx === 0 && stillInTrash === 0) {
+    const safePath = path.join(receiptsDir, path.basename(receiptPath));
+    if (fs.existsSync(safePath)) fs.unlinkSync(safePath);
+  }
+}
+
+function purgeExpiredDeletedTransactions(db, receiptsDir = null) {
+  const nowIso = new Date().toISOString();
+  const expired = db
+    .prepare('SELECT id, receipt_path FROM deleted_transactions WHERE expires_at <= ?')
+    .all(nowIso);
+  if (expired.length === 0) return { purgedCount: 0 };
+
+  db.prepare('DELETE FROM deleted_transactions WHERE expires_at <= ?').run(nowIso);
+  for (const row of expired) {
+    cleanupUnreferencedReceipt(db, row.receipt_path, receiptsDir);
+  }
+  return { purgedCount: expired.length };
+}
+
+function deleteTransactionRows(db, rows, { receiptsDir = null } = {}) {
+  purgeExpiredDeletedTransactions(db, receiptsDir);
+  const cleanRows = (rows || []).filter((r) => r && r.id);
+  if (cleanRows.length === 0) {
+    return { affectedCount: 0, trashIds: [], expiresAt: null, retentionMinutes: getTrashRetentionMinutes(db) };
+  }
+
+  const retentionMinutes = getTrashRetentionMinutes(db);
+  const trashIds = [];
+  let expiresAt = null;
+
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare('DELETE FROM transactions WHERE id = ?').run(existing.id);
+    if (retentionMinutes > 0) {
+      const nowMs = Date.now();
+      const deletedAt = new Date(nowMs).toISOString();
+      expiresAt = new Date(nowMs + retentionMinutes * 60 * 1000).toISOString();
+      const insTrash = db.prepare(
+        `INSERT INTO deleted_transactions (original_tx_id, tx_json, receipt_path, deleted_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`
+      );
+      for (const row of cleanRows) {
+        const info = insTrash.run(row.id, JSON.stringify(row), row.receipt_path || null, deletedAt, expiresAt);
+        trashIds.push(Number(info.lastInsertRowid));
+      }
+    }
+
+    const placeholders = cleanRows.map(() => '?').join(',');
+    const ids = cleanRows.map((r) => r.id);
+    const delRes = db.prepare(`DELETE FROM transactions WHERE id IN (${placeholders})`).run(...ids);
+    recalculateAllBalances(db, null, { insideTx: true });
+    db.exec('COMMIT');
+
+    const seenReceipts = new Set(cleanRows.map((r) => r.receipt_path).filter(Boolean));
+    for (const rPath of seenReceipts) {
+      cleanupUnreferencedReceipt(db, rPath, receiptsDir);
+    }
+    return {
+      affectedCount: Number(delRes.changes || 0),
+      trashIds,
+      expiresAt,
+      retentionMinutes,
+    };
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    throw err;
+  }
+}
+
+function deleteTransaction(db, id, opts = {}) {
+  const existing = db.prepare('SELECT * FROM transactions WHERE id = ?').get(Number(id));
+  if (!existing) throw new Error('Transaction not found.');
+  const res = deleteTransactionRows(db, [existing], opts);
+  return {
+    deletedId: existing.id,
+    trashId: res.trashIds[0] || null,
+    expiresAt: res.expiresAt,
+    retentionMinutes: res.retentionMinutes,
+  };
+}
+
+function listDeletedTransactions(db, receiptsDir = null) {
+  purgeExpiredDeletedTransactions(db, receiptsDir);
+  const retentionMinutes = getTrashRetentionMinutes(db);
+  const rows = db
+    .prepare('SELECT id, original_tx_id, tx_json, receipt_path, deleted_at, expires_at FROM deleted_transactions ORDER BY deleted_at DESC, id DESC')
+    .all();
+
+  const accMap = new Map(db.prepare('SELECT id, name FROM accounts').all().map((a) => [a.id, a.name]));
+  const pocketMap = new Map(db.prepare('SELECT id, name FROM pockets').all().map((p) => [p.id, p.name]));
+  const nowMs = Date.now();
+
+  const items = rows.map((row) => {
+    let tx = {};
+    try {
+      tx = JSON.parse(row.tx_json) || {};
+    } catch {
+      tx = {};
+    }
+    const expMs = Date.parse(row.expires_at);
+    return {
+      id: row.id,
+      originalTxId: row.original_tx_id,
+      date: tx.date || '',
+      type: tx.type || 'expense',
+      amount: Number(tx.amount) || 0,
+      currency: tx.currency || 'HUF',
+      categoryName: tx.category_name || 'Other Expense',
+      merchant: tx.merchant || '',
+      note: tx.note || '',
+      accountName: accMap.get(tx.account_id) || `#${tx.account_id || '?'}`,
+      pocketName: pocketMap.get(tx.pocket_id) || `#${tx.pocket_id || '?'}`,
+      destAccountName: tx.dest_account_id ? accMap.get(tx.dest_account_id) || `#${tx.dest_account_id}` : '',
+      destPocketName: tx.dest_pocket_id ? pocketMap.get(tx.dest_pocket_id) || `#${tx.dest_pocket_id}` : '',
+      receiptPath: row.receipt_path || null,
+      deletedAt: row.deleted_at,
+      expiresAt: row.expires_at,
+      remainingMs: Number.isFinite(expMs) ? Math.max(0, expMs - nowMs) : 0,
+    };
+  });
+
+  return { items, retentionMinutes };
+}
+
+function restoreDeletedTransactions(db, { ids = null, all = false, receiptsDir = null } = {}) {
+  purgeExpiredDeletedTransactions(db, receiptsDir);
+
+  let trashRows;
+  if (all) {
+    trashRows = db.prepare('SELECT * FROM deleted_transactions ORDER BY id ASC').all();
+    if (trashRows.length === 0) {
+      const err = new Error('No recently deleted transactions available to restore.');
+      err.statusCode = 404;
+      throw err;
+    }
+  } else {
+    const cleanIds = Array.from(
+      new Set((Array.isArray(ids) ? ids : []).map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0))
+    );
+    if (cleanIds.length === 0) {
+      const err = new Error('Please select at least one deleted transaction to restore.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const placeholders = cleanIds.map(() => '?').join(',');
+    trashRows = db
+      .prepare(`SELECT * FROM deleted_transactions WHERE id IN (${placeholders}) ORDER BY id ASC`)
+      .all(...cleanIds);
+    if (trashRows.length === 0) {
+      const err = new Error('Deleted transaction expired or no longer available to restore.');
+      err.statusCode = 410;
+      throw err;
+    }
+  }
+
+  const accIds = new Set(db.prepare('SELECT id FROM accounts').all().map((a) => a.id));
+  const pocketIds = new Set(db.prepare('SELECT id FROM pockets').all().map((p) => p.id));
+  const catIds = new Set(db.prepare('SELECT id FROM categories').all().map((c) => c.id));
+  const existsTxStmt = db.prepare('SELECT 1 FROM transactions WHERE id = ?');
+
+  const colsWithId = `(
+    id, date, type, amount, currency, account_id, pocket_id,
+    dest_account_id, dest_pocket_id, dest_amount, category_id, category_name,
+    merchant, note, note_source, items_json, receipt_path, store_address,
+    is_historical, needs_approval, auto_source, exclude_from_analytics, is_hidden, is_recurring,
+    recorded_pocket_balance_after, recorded_dest_pocket_balance_after, created_at
+  )`;
+  const colsNoId = `(
+    date, type, amount, currency, account_id, pocket_id,
+    dest_account_id, dest_pocket_id, dest_amount, category_id, category_name,
+    merchant, note, note_source, items_json, receipt_path, store_address,
+    is_historical, needs_approval, auto_source, exclude_from_analytics, is_hidden, is_recurring,
+    recorded_pocket_balance_after, recorded_dest_pocket_balance_after, created_at
+  )`;
+  const insWithId = db.prepare(`INSERT INTO transactions ${colsWithId} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insNoId = db.prepare(`INSERT INTO transactions ${colsNoId} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const delTrashStmt = db.prepare('DELETE FROM deleted_transactions WHERE id = ?');
+
+  const restoredIds = [];
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const row of trashRows) {
+      const tx = JSON.parse(row.tx_json);
+      if (!accIds.has(Number(tx.account_id)) || !pocketIds.has(Number(tx.pocket_id))) {
+        const err = new Error('Cannot restore transaction because its bank account or pocket was permanently deleted.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (
+        (tx.dest_account_id && !accIds.has(Number(tx.dest_account_id))) ||
+        (tx.dest_pocket_id && !pocketIds.has(Number(tx.dest_pocket_id)))
+      ) {
+        const err = new Error('Cannot restore transfer because its destination bank account or pocket was permanently deleted.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const categoryId = tx.category_id && catIds.has(Number(tx.category_id)) ? Number(tx.category_id) : null;
+      const values = [
+        tx.date,
+        tx.type,
+        tx.amount,
+        tx.currency || 'HUF',
+        Number(tx.account_id),
+        Number(tx.pocket_id),
+        tx.dest_account_id ? Number(tx.dest_account_id) : null,
+        tx.dest_pocket_id ? Number(tx.dest_pocket_id) : null,
+        tx.dest_amount ?? null,
+        categoryId,
+        tx.category_name || 'Other Expense',
+        tx.merchant || '',
+        tx.note || '',
+        tx.note_source || 'manual',
+        tx.items_json || '[]',
+        tx.receipt_path || null,
+        tx.store_address || '',
+        Number(tx.is_historical) ? 1 : 0,
+        Number(tx.needs_approval) ? 1 : 0,
+        tx.auto_source || null,
+        Number(tx.exclude_from_analytics) ? 1 : 0,
+        Number(tx.is_hidden) ? 1 : 0,
+        Number(tx.is_recurring) ? 1 : 0,
+        tx.recorded_pocket_balance_after ?? null,
+        tx.recorded_dest_pocket_balance_after ?? null,
+        tx.created_at || new Date().toISOString(),
+      ];
+
+      const origId = Number(row.original_tx_id);
+      if (Number.isInteger(origId) && origId > 0 && !existsTxStmt.get(origId)) {
+        insWithId.run(origId, ...values);
+        restoredIds.push(origId);
+      } else {
+        const info = insNoId.run(...values);
+        restoredIds.push(Number(info.lastInsertRowid));
+      }
+      delTrashStmt.run(row.id);
+    }
+
     recalculateAllBalances(db, null, { insideTx: true });
     db.exec('COMMIT');
   } catch (err) {
@@ -812,6 +1067,35 @@ function deleteTransaction(db, id) {
     }
     throw err;
   }
+
+  return { ok: true, restoredCount: restoredIds.length, restoredIds };
+}
+
+function permanentlyDeleteTrashItems(db, { ids = null, all = false, receiptsDir = null } = {}) {
+  let targetRows;
+  if (all) {
+    targetRows = db.prepare('SELECT id, receipt_path FROM deleted_transactions').all();
+    db.prepare('DELETE FROM deleted_transactions').run();
+  } else {
+    const cleanIds = Array.from(
+      new Set((Array.isArray(ids) ? ids : []).map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0))
+    );
+    if (cleanIds.length === 0) {
+      const err = new Error('Please select at least one trash entry to delete permanently.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const placeholders = cleanIds.map(() => '?').join(',');
+    targetRows = db
+      .prepare(`SELECT id, receipt_path FROM deleted_transactions WHERE id IN (${placeholders})`)
+      .all(...cleanIds);
+    db.prepare(`DELETE FROM deleted_transactions WHERE id IN (${placeholders})`).run(...cleanIds);
+  }
+
+  for (const row of targetRows) {
+    cleanupUnreferencedReceipt(db, row.receipt_path, receiptsDir);
+  }
+  return { ok: true, purgedCount: targetRows.length };
 }
 
 function approveTransaction(db, id) {
@@ -868,40 +1152,9 @@ function bulkManageTransactions(db, { ids, action, categoryId = null, receiptsDi
   }
 
   if (act === 'delete') {
-    const receiptRows = db
-      .prepare(`SELECT DISTINCT receipt_path FROM transactions WHERE receipt_path IS NOT NULL AND id IN (${placeholders})`)
-      .all(...cleanIds);
-
-    let affectedCount = 0;
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const delRes = db.prepare(`DELETE FROM transactions WHERE id IN (${placeholders})`).run(...cleanIds);
-      affectedCount = Number(delRes.changes || 0);
-      recalculateAllBalances(db, null, { insideTx: true });
-      db.exec('COMMIT');
-    } catch (err) {
-      try {
-        db.exec('ROLLBACK');
-      } catch {
-        // ignore
-      }
-      throw err;
-    }
-
-    if (receiptsDir) {
-      for (const r of receiptRows) {
-        if (!r.receipt_path) continue;
-        const stillUsed = db
-          .prepare('SELECT COUNT(*) AS cnt FROM transactions WHERE receipt_path = ?')
-          .get(r.receipt_path).cnt;
-        if (stillUsed === 0) {
-          const safePath = path.join(receiptsDir, path.basename(r.receipt_path));
-          if (fs.existsSync(safePath)) fs.unlinkSync(safePath);
-        }
-      }
-    }
-
-    return { ok: true, action: act, affectedCount };
+    const rows = db.prepare(`SELECT * FROM transactions WHERE id IN (${placeholders})`).all(...cleanIds);
+    const res = deleteTransactionRows(db, rows, { receiptsDir });
+    return { ok: true, action: act, ...res };
   }
 
   if (act === 'mark_live' || act === 'mark_historical') {
@@ -1156,6 +1409,7 @@ function syncPocketBalance(db, pocketId, targetBalance, { mode = 'auto', date = 
  * Aggregate full dashboard view: accounts, pockets, KPIs, SVG chart datasets, and filtered ledger rows.
  */
 function getDashboardData(db, filters = {}) {
+  purgeExpiredDeletedTransactions(db, filters.receiptsDir || null);
   const fxRates = getFxRates(db);
   const needsBeforeBackfill = db
     .prepare('SELECT 1 FROM transactions WHERE pocket_balance_after IS NOT NULL AND pocket_balance_before IS NULL LIMIT 1')
@@ -1620,6 +1874,8 @@ function getDashboardData(db, filters = {}) {
   );
   const pendingApprovalCount = activeBankTx.filter((tx) => tx.needs_approval === 1).length;
   const hiddenTxCount = activeBankTx.filter((tx) => tx.is_hidden === 1).length;
+  const deletedTxCount = db.prepare('SELECT COUNT(*) AS cnt FROM deleted_transactions').get().cnt;
+  const trashRetentionMinutes = getTrashRetentionMinutes(db);
   const filterCounts = {
     hidden: hiddenTxCount,
     needsApproval: pendingApprovalCount,
@@ -1641,6 +1897,8 @@ function getDashboardData(db, filters = {}) {
     dashboardLayout,
     pendingApprovalCount,
     hiddenTxCount,
+    deletedTxCount,
+    trashRetentionMinutes,
     filterCounts,
     selectedSort: filters.sort || 'date_desc',
     analyticsScope: {
@@ -1691,7 +1949,7 @@ function getDashboardData(db, filters = {}) {
 }
 
 const GENERIC_COUNTERPARTY_REGEX =
-  /^(?:otp(?:\s+bank|\s+mobilbank|\s+smartbank)?|erste(?:\s+bank|\s+george)?|george|revolut|wise|kártyás\s+vásárlás|bankkártyás\s+vásárlás|kártyás\s+fizetés|sikeres\s+(?:online\s+|kártyás\s+|bankkártyás\s+|pos\s+)?(?:vásárlás|fizetés|tranzakció|átutalás|utalás|jóváírás|terhelés)|(?:online|sikeres)\s+(?:vásárlás|fizetés|tranzakció)|vásárlás|fizetés|tranzakció|értesítés|azonnali\s+átutalás|átutalás|utalás|jóváírás|terhelés|fizetés\s+érkezett|beérkező\s+utalás|kimenő\s+utalás|card\s+payment|bank\s+card\s+payment|incoming\s+bank\s+transfer|internal\s+bank\s+transfer|instant\s+transfer|payment(?:\s+(?:received|sent))?|transfer|transaction|alert|notification|money\s+(?:received|sent))$/i;
+  /^(?:otp(?:\s+bank|\s+mobilbank|\s+smartbank)?|erste(?:\s+bank|\s+george)?|george|revolut|wise|kártyás\s+(?:vásárlás|fizetés|tranzakció)|bankkártyás\s+(?:vásárlás|fizetés)|(?:sikeres\s+)?qvik(?:\s+(?:fizetési\s+)?(?:fizetés|vásárlás|utalás|átutalás|tranzakció|azonnali\s+(?:fizetés|átutalás|utalás)|kérel(?:em|met)(?:\s+kaptál)?))?|fizetési\s+kérel(?:em|met)(?:\s+kaptál)?|kérel(?:em|met)\s+(?:kaptál|érkezett)|request\s+to\s+pay|money\s+request|payment\s+request|sikeres\s+(?:online\s+|kártyás\s+|bankkártyás\s+|pos\s+|qvik\s+)?(?:vásárlás|fizetés|tranzakció|átutalás|utalás|jóváírás|terhelés)|(?:online|sikeres)\s+(?:vásárlás|fizetés|tranzakció)|vásárlás|fizetés|tranzakció|értesítés|azonnali\s+átutalás|átutalás|utalás|jóváírás|terhelés|fizetés\s+érkezett|beérkezett\s+(?:utalás|átutalás|fizetés|összeg)|kimenő\s+(?:utalás|átutalás|fizetés)|visszatérítés(?:\s+(?:érkezett|úton\s+van))?|card\s+(?:payment|purchase|transaction)|bank\s+card\s+payment|incoming\s+(?:transfer|payment|bank\s+transfer)|outgoing\s+(?:transfer|payment|bank\s+transfer)|internal\s+(?:transfer|bank\s+transfer)|instant\s+transfer|transfer(?:\s+(?:sent|received|completed|arrived|confirmed))?|refund(?:\s+(?:arrived|received|completed|processed|issued|credited|is\s+on\s+the\s+way))?|payment(?:\s+(?:sent|received|completed|confirmed|refunded|arrived))?|money\s+(?:sent|received|added|transferred)|(?:account\s+)?top[- ]?up(?:\s+(?:completed|successful|received))?|cashback(?:\s+(?:received|earned|arrived))?|transaction|alert|notification)$/i;
 
 const CORPORATE_NOISE_TOKENS = new Set([
   'zrt',
@@ -1761,9 +2019,16 @@ const DESCRIPTOR_TOKENS = new Set([
   'online',
 ]);
 
+function stripEmojisAndSymbols(raw) {
+  return String(raw || '')
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function isGenericCounterpartyName(name) {
-  const stripped = String(name || '')
-    .replace(/^[\s!?.:;,\-–—]+|[\s!?.:;,\-–—]+$/g, '')
+  const stripped = stripEmojisAndSymbols(name)
+    .replace(/^[\s!?.:;,\-–—*•]+|[\s!?.:;,\-–—*•]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!stripped || stripped === '?') return true;
@@ -1776,7 +2041,7 @@ function cleanRawMerchantString(raw) {
   s = s.replace(/^(?:CRV|CURVE|SUMUP|SQ|PAYPAL|PP|BARION|SIMPLEPAY|SIMPLE|GOPAY|VPOS|OTP\s*MOBIL|NYX)\s*\*\s*/i, '');
   s = s.replace(/^(?:sikeresen\s+)?(?:vásároltál|fizettél|költöttél)\s+a(?:\(z\)|z)?\s+/i, '');
   s = s.replace(
-    /\s+(?:kereskedőnél|webshopjában|webshopban|webáruházában|webáruházban|üzletében|üzletben|boltjában|boltban|étteremben|alkalmazásban|helyszínén|helyen|elfogadóhelyen|terminálon)[.!,;\s]*$/i,
+    /\s+(?:kereskedőnél|webshopjában|webshopban|webáruházában|webáruházban|üzletében|üzletben|boltjában|boltban|étteremben|alkalmazásban|helyszínén|helyen|elfogadóhelyen|terminálon|részére)[.!,;\s]*$/i,
     ''
   );
   s = s.replace(/\s+\d{3,}\s+ONKISZ(?:OLG[AÁ]L[OÓ])?\b.*$/i, '');
@@ -2871,6 +3136,12 @@ module.exports = {
   getTransactionById,
   updateTransaction,
   deleteTransaction,
+  sanitizeTrashRetentionMinutes,
+  getTrashRetentionMinutes,
+  purgeExpiredDeletedTransactions,
+  listDeletedTransactions,
+  restoreDeletedTransactions,
+  permanentlyDeleteTrashItems,
   approveTransaction,
   approveAllTransactions,
   bulkManageTransactions,
@@ -2881,6 +3152,8 @@ module.exports = {
   updateCounterparty,
   deleteCounterparty,
   listCounterparties,
+  stripEmojisAndSymbols,
+  normalizeForMatch,
   isGenericCounterpartyName,
   cleanRawMerchantString,
   scoreCounterpartySimilarity,
