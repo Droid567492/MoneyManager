@@ -1,4 +1,4 @@
-const CACHE_NAME = 'moneymanager-shell-v75';
+const CACHE_NAME = 'moneymanager-shell-v76';
 const SHELL_ASSETS = [
   './',
   './index.html',

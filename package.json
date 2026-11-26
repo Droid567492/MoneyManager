@@ -1,6 +1,6 @@
 {
   "name": "moneymanager",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Self-hosted personal finance PWA with multi-bank pockets, Gemini receipt scanning, Google Sheets import, scheduled backups, and deterministic running balance tracking.",
   "main": "src/server.js",
   "scripts": {

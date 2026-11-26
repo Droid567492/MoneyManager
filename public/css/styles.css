@@ -4031,10 +4031,20 @@ tr.row-hidden-tx td:not(:first-child):not(:last-child) {
 }
 
 .auth-version-footer {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 0;
   text-align: center;
+}
+
+.auth-version-footer .app-version-badge {
+  font-size: 0.66rem;
+  opacity: 0.45;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s ease;
+}
+
+.auth-version-footer .app-version-badge:hover {
+  opacity: 0.8;
 }
 
 .app-version-badge {
